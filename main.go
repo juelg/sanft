@@ -6,6 +6,7 @@ import (
 	"net"
 )
 
+// TODO: find out how get free UDP port on system and reserve it
 func main() {
 	/* open a socket */
 	laddr := net.UDPAddr{
@@ -13,10 +14,14 @@ func main() {
 		IP:   net.ParseIP("127.0.0.1"),
 	}
 	conn, err := net.ListenUDP("udp", &laddr)
+	// fmt.Println("Hello, World!")
 	if err != nil {
 		fmt.Printf("Error while listening: %v", err)
 		return
 	}
+
+	// Connection should also be closed later on
+	defer conn.Close()
 
 	/* Send an NTM message */
 	Token := [256]uint8{1, 2, 3, 4, 5}

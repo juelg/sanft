@@ -4,6 +4,8 @@ import (
 	"net"
 )
 
+// TODO: do we need to pack the structs?
+
 type Message interface {
 	Send(conn *net.UDPConn, addr *net.UDPAddr) error
 }
@@ -22,6 +24,7 @@ type ServerHeader struct {
 	Error   uint8
 }
 
+// TODO constructors
 type NTM struct {
 	Header ServerHeader
 	Token  [256]uint8
@@ -37,7 +40,7 @@ type MDRR struct {
 	ChunkSize      uint16
 	MaxChunksInACR uint16
 	FileID         uint32
-	FileSize       [6]uint8 /* alas, there is no uint48 :-( */
+	FileSize       [6]uint8 /* alias, there is no uint48 :-( */
 	Checksum       [256]uint8
 }
 
