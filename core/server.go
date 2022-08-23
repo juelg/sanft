@@ -1,6 +1,8 @@
 package core
 
-
+import (
+	"net"
+)
 
 type ServerState struct {
 	// keying material
@@ -12,4 +14,5 @@ type ServerState struct {
 	// read out from some config:
 	ChunkSize      uint16
 	MaxChunksInACR uint16
+	Conn *net.UDPConn
 }
