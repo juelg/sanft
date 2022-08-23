@@ -4,6 +4,7 @@ import (
 	"net"
 )
 
+// TODO: do we need to pack the structs? -> should already be packed when casting in binary
 
 // version
 const VERS uint8 = 0
@@ -72,10 +73,10 @@ type MDR struct {
 	URI    string /* this must be handled manualy when sending */
 }
 
-func GetMDR(number uint8, token *[256]uint8, uri *string) *MDR{
+func GetMDR(number uint8, token *[256]uint8, uri string) *MDR{
 	mdr := new(MDR)
 	mdr.Header = ClientHeader{Version: VERS, Type: MDR_t, Number: number, Token: *token}
-	mdr.URI = *uri
+	mdr.URI = uri
 	return mdr
 }
 
