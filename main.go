@@ -6,8 +6,10 @@ import (
 	"net"
 )
 
-// TODO: find out how get free UDP port on system and reserve it
 func main() {
+
+	// TODO: cli
+
 	/* open a socket */
 	laddr := net.UDPAddr{
 		Port: 1234,
