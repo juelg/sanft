@@ -87,7 +87,7 @@ func ClientReceive(conn *net.UDPConn, timeout int64) ([]byte, error) {
 // 	}
 // }
 
-func ParseClient(data *[]byte) (Message, error) {
+func ParseClient(data *[]byte) (ClientMessage, error) {
 	d := *data
 	// check version
 	if d[0] != 0 {
@@ -98,7 +98,7 @@ func ParseClient(data *[]byte) (Message, error) {
 		return nil, fmt.Errorf("received wrong client message type: %d", d[1])
 	}
 	// err := binary.Write(buf, binary.BigEndian, m)
-	var parsed_data Message
+	var parsed_data ClientMessage
 	var err error
 	switch d[1] {
 	case 1:
@@ -126,7 +126,7 @@ func ParseClient(data *[]byte) (Message, error) {
 
 }
 
-func ParseServer(data *[]byte) (Message, error) {
+func ParseServer(data *[]byte) (ServerMessage, error) {
 	d := *data
 	// check version
 	if d[0] != 0 {
@@ -137,7 +137,7 @@ func ParseServer(data *[]byte) (Message, error) {
 		return nil, fmt.Errorf("received wrong server message type: %d", d[1])
 	}
 	r := bytes.NewReader(d)
-	var parsed_data Message
+	var parsed_data ServerMessage
 	var err error
 	switch d[1] {
 	case 0:

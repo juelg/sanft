@@ -7,8 +7,6 @@ import (
 	"net"
 )
 
-// todo: client messages should have an addr argument and should just use the Write method
-
 func (m NTM) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
 	buf := new(bytes.Buffer)
 	// TODO: we want to send big endian, right?
@@ -23,7 +21,7 @@ func (m NTM) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
 	return nil
 }
 
-func (m MDR) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
+func (m MDR) Send(conn *net.UDPConn) error {
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, binary.BigEndian, m.Header)
 	if err != nil {
@@ -34,7 +32,6 @@ func (m MDR) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
 	if err != nil {
 		return fmt.Errorf("error encoding message: %v", err)
 	}
-	// _, err = conn.WriteToUDP(buf.Bytes(), addr)
 	_, err = conn.Write(buf.Bytes())
 	if err != nil {
 		return fmt.Errorf("error sending message: %v", err)
@@ -55,7 +52,7 @@ func (m MDRR) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
 	return nil
 }
 
-func (m ACR) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
+func (m ACR) Send(conn *net.UDPConn) error {
 	buf := new(bytes.Buffer)
 	/* Once again, we must encode things manually and not all at once */
 	/* encode header */
@@ -79,7 +76,7 @@ func (m ACR) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
 		return fmt.Errorf("error encoding message: %v", err)
 	}
 	/* and finally, send it! */
-	_, err = conn.WriteToUDP(buf.Bytes(), addr)
+	_, err = conn.Write(buf.Bytes())
 	if err != nil {
 		return fmt.Errorf("error sending message: %v", err)
 	}

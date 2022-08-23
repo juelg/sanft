@@ -33,8 +33,12 @@ const (
 )
 
 
-type Message interface {
+type ServerMessage interface {
 	Send(conn *net.UDPConn, addr *net.UDPAddr) error
+}
+
+type ClientMessage interface {
+	Send(conn *net.UDPConn) error
 }
 
 type ClientHeader struct {
