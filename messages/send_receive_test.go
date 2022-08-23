@@ -3,8 +3,9 @@ package messages
 import (
 	"fmt"
 	"net"
+	"os"
 	"testing"
-    "math/rand"
+	"math/rand"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -64,6 +65,8 @@ func createTestServerAndClient(t *testing.T) (*net.UDPConn, *net.UDPConn, *net.U
 
     return conn_server, conn_client, addr
 }
+
+// test protocol messages
 
 func TestMDR(t *testing.T){
     conn_server, conn_client, _ := createTestServerAndClient(t)
@@ -173,4 +176,58 @@ func TestACR(t *testing.T){
     assert.Equal(t, acr.FileID, msg.FileID, "fileid missmatch")
     assert.Equal(t, acr.PacketRate, msg.PacketRate, "packetrate missmatch")
     assert.Equal(t, acr.CRs, msg.CRs, "CRs missmatch")
+}
+
+func TestCRR(t *testing.T){
+    conn_server, conn_client, addr := createTestServerAndClient(t)
+    defer conn_client.Close()
+    defer conn_server.Close()
+
+
+    sdata := []uint8("asdf")
+    msg := GetCRR(2, 9, *Int2uint8_6_arr(42), &sdata)
+    err := msg.Send(conn_server, addr)
+    if err != nil{
+        t.Fatalf(`Error while sending message to client: %v`, err)
+    }
+    data, err := ClientReceive(conn_client, 10000)
+    if err != nil{
+        t.Fatalf(`Error while receiving on client: %v`, err)
+    }
+    // parse message
+    msgr, err := ParseServer(&data)
+    if err != nil{
+        t.Fatalf(`Error while parsing server message: %v`, err)
+    }
+    // type assertion
+    var crr CRR = msgr.(CRR)
+    // sanity check received data
+    assert.Equal(t, crr.Header.Number, msg.Header.Number, "Header number missmatch")
+    assert.Equal(t, crr.Header.Error, msg.Header.Error, "Header error missmatch")
+    assert.Equal(t, crr.Header.Type, msg.Header.Type, "Header type missmatch")
+    assert.Equal(t, crr.Header.Version, msg.Header.Version, "Header version missmatch")
+
+    assert.Equal(t, crr.ChunkNumber, msg.ChunkNumber, "chunknumber missmatch")
+    assert.Equal(t, crr.Data, msg.Data, "data missmatch")
+}
+
+// test further stuff
+
+func TestTimeout(t *testing.T){
+    conn_server, conn_client, _ := createTestServerAndClient(t)
+    defer conn_client.Close()
+    defer conn_server.Close()
+
+    _, err := ClientReceive(conn_client, 100)
+
+    if !os.IsTimeout(err){
+        t.Fatalf(`This receive should actually time out!`)
+    }
+    if err, ok := err.(net.Error); !ok || !err.Timeout() {
+        // this for does the same as above
+        t.Fatalf(`This receive should actually time out!`)
+    }
+    if err == nil{
+        t.Fatalf(`This receive should actually time out!`)
+    }
 }

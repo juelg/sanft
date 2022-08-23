@@ -33,7 +33,8 @@ func ClientReceive(conn *net.UDPConn, timeout int64) ([]byte, error) {
 
 	n, _, err := conn.ReadFromUDP(buffer)
 	if err != nil {
-		return nil, fmt.Errorf("error receiving message: %v", err)
+		// return error as it is to match for timeout error type
+		return nil, err
 	}
 	// TODO: is this bad because is copies memory around?
 	return buffer[:n], nil
@@ -61,10 +62,30 @@ func ParseClient(data *[]byte) (ClientMessage, error) {
 		parsed_data = mdr
 
 	case ACR_t:
-		// TODO: maybe this needs to be done manually
-		r := bytes.NewReader(d)
 		var acr ACR
-		err = binary.Read(r, binary.BigEndian, &acr)
+		err = binary.Read(bytes.NewBuffer(d[:259]), binary.BigEndian, &acr.Header)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read: %v", err)
+		}
+		err = binary.Read(bytes.NewBuffer(d[259:259+4]), binary.BigEndian, &acr.FileID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read: %v", err)
+		}
+		err = binary.Read(bytes.NewBuffer(d[259+4:267]), binary.BigEndian, &acr.PacketRate)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read: %v", err)
+		}
+
+		acr.CRs = make([]CR, (len(d) - 267)/7)
+
+		for i:=0; i < (len(d) - 267)/7; i++{
+			// var cr CR
+			err = binary.Read(bytes.NewBuffer(d[267+7*i:267+7*i+7]), binary.BigEndian, &acr.CRs[i])
+			if err != nil {
+				return nil, fmt.Errorf("failed to read: %v", err)
+			}
+		}
+
 		parsed_data = acr
 	default:
 		// no valid client packet
@@ -101,9 +122,21 @@ func ParseServer(data *[]byte) (ServerMessage, error) {
 		parsed_data = mdrr
 
 	case CRR_t:
-		// TODO: maybe this needs to be done manually
 		var crr CRR
-		err = binary.Read(r, binary.BigEndian, &crr)
+
+		err = binary.Read(bytes.NewBuffer(d[:4]), binary.BigEndian, &crr.Header)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read header: %v", err)
+		}
+		err = binary.Read(bytes.NewBuffer(d[4:10]), binary.BigEndian, &crr.ChunkNumber)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read chunknumber: %v", err)
+		}
+		// crr.Data = make([]uint8, len(d) - 10)
+		// err = binary.Read(bytes.NewBuffer(d[10:]), binary.BigEndian, &crr.Data)
+
+		crr.Data = []uint8(d[10:])
+
 		parsed_data = crr
 
 	default:
