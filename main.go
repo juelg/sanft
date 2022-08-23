@@ -9,13 +9,13 @@ import (
 )
 
 var (
-	host       = kingpin.Arg("host", "the host to request from (hostname or IPv4 address)").ResolvedIP()
-	serverMode = kingpin.Flag("server", "server mode: accept incoming requests from any host Operate in client mode if “-s” is not specified").Short('s').Default("false").Bool()
-	port       = kingpin.Flag("port", "specify the port number to use (use 1337 as default if not given)").Default("1337").Short('t').Int()
-	markovP    = kingpin.Flag("p", "specify the loss probabilities for the Markov chain model").Short('p').Int()
-	markovQ    = kingpin.Flag("q", "specify the loss probabilities for the Markov chain model").Short('q').Int()
-	fileDir    = kingpin.Flag("file-dir", "specify the directory containing the files that the server should serve").Short('d').Default("/var/www/sanft").ExistingDir()
-	files      = kingpin.Arg("files", "the name of the file(s) to fetch").Strings()
+	host       = kingpin.Arg("host", "The host to request from (hostname or IPv4 address).").ResolvedIP()
+	serverMode = kingpin.Flag("server", "Server mode: accept incoming requests from any host. Operate in client mode if “-s” is not specified.").Short('s').Default("false").Bool()
+	port       = kingpin.Flag("port", "Specify the port number to use (use 1337 as default if not given).").Default("1337").Short('t').Int()
+	markovP    = kingpin.Flag("p", "Specify the loss probabilities for the Markov chain model.").Short('p').Int()
+	markovQ    = kingpin.Flag("q", "Specify the loss probabilities for the Markov chain model.").Short('q').Int()
+	fileDir    = kingpin.Flag("file-dir", "Specify the directory containing the files that the server should serve.").Short('d').Default("/var/www/sanft").ExistingDir()
+	files      = kingpin.Arg("files", "The name of the file(s) to fetch.").Strings()
 )
 
 func main() {
