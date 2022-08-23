@@ -7,6 +7,9 @@ import (
 )
 
 func main() {
+
+	// TODO: cli
+
 	/* open a socket */
 	laddr := net.UDPAddr{
 		Port: 1234,
@@ -17,6 +20,9 @@ func main() {
 		fmt.Printf("Error while listening: %v", err)
 		return
 	}
+
+	// Connection should also be closed later on
+	defer conn.Close()
 
 	/* Send an NTM message */
 	Token := [256]uint8{1, 2, 3, 4, 5}
@@ -31,7 +37,7 @@ func main() {
 	/* Send an MDR message */
 	ch := messages.ClientHeader{Number: 6}
 	m1 := messages.MDR{Header: ch, URI: "/test/bla/blub"}
-	err = m1.Send(conn, &laddr)
+	err = m1.Send(conn)
 	if err != nil {
 		fmt.Printf("Error while sending:  %v", err)
 		return
@@ -51,7 +57,7 @@ func main() {
 	cr1 := messages.CR{Length: 5}
 	cr2 := messages.CR{Length: 7}
 	m3 := messages.ACR{Header: ch, CRs: []messages.CR{cr1, cr2}}
-	err = m3.Send(conn, &laddr)
+	err = m3.Send(conn)
 	if err != nil {
 		fmt.Printf("Error while sending:  %v", err)
 		return
