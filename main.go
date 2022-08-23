@@ -3,12 +3,41 @@ package main
 import (
 	"fmt"
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
+	"gopkg.in/alecthomas/kingpin.v2"
 	"net"
+	"os"
+)
+
+var (
+	host       = kingpin.Arg("host", "the host to request from (hostname or IPv4 address)").ResolvedIP()
+	serverMode = kingpin.Flag("server", "server mode: accept incoming requests from any host Operate in client mode if “-s” is not specified").Short('s').Default("false").Bool()
+	port       = kingpin.Flag("port", "specify the port number to use (use 1337 as default if not given)").Default("1337").Short('t').Int()
+	markovP    = kingpin.Flag("p", "specify the loss probabilities for the Markov chain model").Short('p').Int()
+	markovQ    = kingpin.Flag("q", "specify the loss probabilities for the Markov chain model").Short('q').Int()
+	files      = kingpin.Arg("files", "the name of the file(s) to fetch").Strings()
 )
 
 func main() {
+	kingpin.Parse()
 
-	// TODO: cli
+	fmt.Printf("Host: %s, Server Mode: %b, port: %d, markovP: %d markovQ: %d, files: %s\n", *host, *serverMode, *port, *markovP, *markovQ, *files)
+	fmt.Println("files: ", *files)
+
+	if *serverMode { /* server mode */
+		// TODO start server
+	} else { /* client mode */
+		if *host == nil {
+			fmt.Printf("error: When running in client mode, a server IP/hostname must be provided!\n")
+			os.Exit(1)
+		}
+		if len(*files) < 1 {
+			fmt.Printf("error: When running in client mode, at least one file URI must be provided!\n")
+			os.Exit(1)
+		}
+		// TODO start client threads
+	}
+
+	return
 
 	/* open a socket */
 	laddr := net.UDPAddr{
