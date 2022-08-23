@@ -4,7 +4,34 @@ import (
 	"net"
 )
 
-// TODO: do we need to pack the structs?
+
+// version
+const VERS uint8 = 0
+
+// server message types
+const (
+	NTM_t  uint8 = 0
+	MDRR_t uint8 = 2
+	CRR_t 		 = 4
+)
+
+
+// client message types
+const (
+	MDR_t uint8 = 1
+	ACR_t uint8	= 3
+)
+
+// error codes
+const (
+	NoError           uint8 = 0
+	UnsupporedVersion uint8 = 1
+	InvalidFileID	  uint8 = 2
+	TooManyClients	  uint8 = 3
+	ChunkOutOfBounds  uint8	= 4
+	ZeroLengthCR	  uint8 = 5
+)
+
 
 type Message interface {
 	Send(conn *net.UDPConn, addr *net.UDPAddr) error
@@ -24,15 +51,28 @@ type ServerHeader struct {
 	Error   uint8
 }
 
-// TODO constructors
 type NTM struct {
 	Header ServerHeader
 	Token  [256]uint8
 }
 
+func GetNTM(number uint8, err uint8, token *[256]uint8) *NTM{
+	ntm := new(NTM)
+	ntm.Header = ServerHeader{Version: VERS, Type: NTM_t, Number: number, Error: err}
+	ntm.Token = *token
+	return ntm
+}
+
 type MDR struct {
 	Header ClientHeader
 	URI    string /* this must be handled manualy when sending */
+}
+
+func GetMDR(number uint8, token *[256]uint8, uri *string) *MDR{
+	mdr := new(MDR)
+	mdr.Header = ClientHeader{Version: VERS, Type: MDR_t, Number: number, Token: *token}
+	mdr.URI = *uri
+	return mdr
 }
 
 type MDRR struct {
@@ -44,9 +84,28 @@ type MDRR struct {
 	Checksum       [256]uint8
 }
 
+func GetMDRR(number uint8, err uint8, chunk_size uint16,
+			max_chunks_in_acr uint16, fileid uint32, filesize *[6]uint8, checksum *[256]uint8) *MDRR{
+	mdrr := new(MDRR)
+	mdrr.Header = ServerHeader{Version: VERS, Type: MDRR_t, Number: number, Error: err}
+	mdrr.ChunkSize = chunk_size
+	mdrr.MaxChunksInACR = max_chunks_in_acr
+	mdrr.FileID = fileid
+	mdrr.FileSize = *filesize
+	mdrr.Checksum = *checksum
+	return mdrr
+}
+
 type CR struct {
 	ChunkOffset [6]uint8 /* note to self: 48-bit field sizes were a dumb idea */
 	Length      uint8
+}
+
+func GetCR(chunkoffset [6]uint8, length uint8) *CR{
+	cr := new(CR)
+	cr.ChunkOffset = chunkoffset
+	cr.Length = length
+	return cr
 }
 
 type ACR struct {
@@ -56,8 +115,25 @@ type ACR struct {
 	CRs        []CR
 }
 
+func GetACR(number uint8, token *[256]uint8, fileid uint32, packet_rate uint32, crlist *[]CR) *ACR{
+	acr := new(ACR)
+	acr.Header = ClientHeader{Version: VERS, Type: ACR_t, Number: number, Token: *token}
+	acr.FileID = fileid
+	acr.PacketRate = packet_rate
+	acr.CRs = *crlist
+	return acr
+}
+
 type CRR struct {
 	Header      ServerHeader
 	ChunkNumber [6]uint8 /* :-( */
 	Data        []uint8
+}
+
+func GetCRR(number uint8, err uint8, chunknumber *[6]uint8, data *[]uint8) *CRR{
+	crr := new(CRR)
+	crr.Header = ServerHeader{Version: VERS, Type: CRR_t, Number: number, Error: err}
+	crr.ChunkNumber = *chunknumber
+	crr.Data = *data
+	return crr
 }
