@@ -1,6 +1,7 @@
 package messages
 
 import (
+	"encoding/binary"
 	"net"
 )
 
@@ -32,6 +33,12 @@ const (
 	ChunkOutOfBounds  uint8	= 4
 	ZeroLengthCR	  uint8 = 5
 )
+
+func Int2uint8_6_arr(a uint64) *[6]uint8 {
+	b := make([]uint8, 8)
+	binary.LittleEndian.PutUint64(b, a)
+    return (*[6]uint8)(b[:6])
+}
 
 
 type ServerMessage interface {
@@ -90,13 +97,13 @@ type MDRR struct {
 }
 
 func GetMDRR(number uint8, err uint8, chunk_size uint16,
-			max_chunks_in_acr uint16, fileid uint32, filesize *[6]uint8, checksum *[256]uint8) *MDRR{
+			max_chunks_in_acr uint16, fileid uint32, filesize [6]uint8, checksum *[256]uint8) *MDRR{
 	mdrr := new(MDRR)
 	mdrr.Header = ServerHeader{Version: VERS, Type: MDRR_t, Number: number, Error: err}
 	mdrr.ChunkSize = chunk_size
 	mdrr.MaxChunksInACR = max_chunks_in_acr
 	mdrr.FileID = fileid
-	mdrr.FileSize = *filesize
+	mdrr.FileSize = filesize
 	mdrr.Checksum = *checksum
 	return mdrr
 }
@@ -135,10 +142,10 @@ type CRR struct {
 	Data        []uint8
 }
 
-func GetCRR(number uint8, err uint8, chunknumber *[6]uint8, data *[]uint8) *CRR{
+func GetCRR(number uint8, err uint8, chunknumber [6]uint8, data *[]uint8) *CRR{
 	crr := new(CRR)
 	crr.Header = ServerHeader{Version: VERS, Type: CRR_t, Number: number, Error: err}
-	crr.ChunkNumber = *chunknumber
+	crr.ChunkNumber = chunknumber
 	crr.Data = *data
 	return crr
 }

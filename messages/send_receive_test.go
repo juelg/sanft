@@ -96,9 +96,45 @@ func TestNTM(t *testing.T){
     // type assertion
     var ntm NTM = msgr.(NTM)
     // sanity check received data
-    assert.Equal(t, ntm.Header.Number, ntm.Header.Number, "Header number missmatch")
-    assert.Equal(t, ntm.Header.Error, msg.Header.Error, "Header token missmatch")
+    assert.Equal(t, ntm.Header.Number, msg.Header.Number, "Header number missmatch")
+    assert.Equal(t, ntm.Header.Error, msg.Header.Error, "Header error missmatch")
     assert.Equal(t, ntm.Header.Type, msg.Header.Type, "Header type missmatch")
     assert.Equal(t, ntm.Header.Version, msg.Header.Version, "Header version missmatch")
-    assert.Equal(t, ntm.Token, msg.Token, "URI missmatch")
+    assert.Equal(t, ntm.Token, msg.Token, "Token missmatch")
+}
+
+func TestMDRR(t *testing.T){
+    conn_server, conn_client, addr := createTestServerAndClient(t)
+    defer conn_client.Close()
+    defer conn_server.Close()
+
+    msg := GetMDRR(0, NoError, 8, 200, 12345, *Int2uint8_6_arr(123), createRandomToken())
+    // TODO: I find this msg.send unintuative and would rather prefer something like
+    // client.send(msg)
+    err := msg.Send(conn_server, addr)
+    if err != nil{
+        t.Fatalf(`Error while sending message to client: %v`, err)
+    }
+    data, err := ClientReceive(conn_client, 10000)
+    if err != nil{
+        t.Fatalf(`Error while receiving on client: %v`, err)
+    }
+    // parse message
+    msgr, err := ParseServer(&data)
+    if err != nil{
+        t.Fatalf(`Error while parsing server message: %v`, err)
+    }
+    // type assertion
+    var mdrr MDRR = msgr.(MDRR)
+    // sanity check received data
+    assert.Equal(t, mdrr.Header.Number, msg.Header.Number, "Header number missmatch")
+    assert.Equal(t, mdrr.Header.Error, msg.Header.Error, "Header error missmatch")
+    assert.Equal(t, mdrr.Header.Type, msg.Header.Type, "Header type missmatch")
+    assert.Equal(t, mdrr.Header.Version, msg.Header.Version, "Header version missmatch")
+
+    assert.Equal(t, mdrr.Checksum, msg.Checksum, "checksum missmatch")
+    assert.Equal(t, mdrr.ChunkSize, msg.ChunkSize, "chunksize missmatch")
+    assert.Equal(t, mdrr.FileID, msg.FileID, "fileid missmatch")
+    assert.Equal(t, mdrr.MaxChunksInACR, msg.MaxChunksInACR, "maxchunksinacr missmatch")
+    assert.Equal(t, mdrr.FileSize, msg.FileSize, "filesize missmatch")
 }
