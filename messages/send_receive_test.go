@@ -138,3 +138,39 @@ func TestMDRR(t *testing.T){
     assert.Equal(t, mdrr.MaxChunksInACR, msg.MaxChunksInACR, "maxchunksinacr missmatch")
     assert.Equal(t, mdrr.FileSize, msg.FileSize, "filesize missmatch")
 }
+
+func TestACR(t *testing.T){
+    conn_server, conn_client, _ := createTestServerAndClient(t)
+    defer conn_client.Close()
+    defer conn_server.Close()
+
+	cr1 := CR{ChunkOffset: *Int2uint8_6_arr(32), Length: 5}
+	cr2 := CR{ChunkOffset: *Int2uint8_6_arr(42), Length: 6}
+    crl := []CR{cr1, cr2}
+
+    msg := GetACR(2, createRandomToken(), 42, 21, &crl)
+    err := msg.Send(conn_client)
+    if err != nil{
+        t.Fatalf(`Error while sending message to server: %v`, err)
+    }
+    _, data, err := ServerReceive(conn_server)
+    if err != nil{
+        t.Fatalf(`Error while receiving on server: %v`, err)
+    }
+    // parse message
+    msgr, err := ParseClient(&data)
+    if err != nil{
+        t.Fatalf(`Error while parsing client message: %v`, err)
+    }
+    // type assertion
+    var acr ACR = msgr.(ACR)
+    // sanity check received data
+    assert.Equal(t, acr.Header.Number, msg.Header.Number, "Header number missmatch")
+    assert.Equal(t, acr.Header.Token, msg.Header.Token, "Header token missmatch")
+    assert.Equal(t, acr.Header.Type, msg.Header.Type, "Header type missmatch")
+    assert.Equal(t, acr.Header.Version, msg.Header.Version, "Header version missmatch")
+
+    assert.Equal(t, acr.FileID, msg.FileID, "fileid missmatch")
+    assert.Equal(t, acr.PacketRate, msg.PacketRate, "packetrate missmatch")
+    assert.Equal(t, acr.CRs, msg.CRs, "CRs missmatch")
+}
