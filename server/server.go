@@ -1,25 +1,16 @@
 package server
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
-
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 )
 
 type Server struct {
-	// keying material
-	// fileID map: needs to be in both ways
-	// -> maybe write own abstraction to keep in sync
-	// or find library
-	// File2ID map[string]uint32
-	// ID2File map[uint32]string
 	// read out from some config:
 	ChunkSize      uint16
 	MaxChunksInACR uint16
@@ -30,10 +21,7 @@ type Server struct {
 
 	FileIDMap map[string]string
 
-	// PrivateKey ed25519.PrivateKey
-	// PublicKey ed25519.PublicKey
-	// key []byte
-	block cipher.Block
+	// keying material
 	key []byte
 }
 
@@ -85,40 +73,16 @@ func Init(ip string, port int, root_dir string, chunk_size uint16, max_chunks_in
 	// empty file ID map
 	s.FileIDMap = make(map[string]string)
 
-	// create private key
-	// public_key, private_key, err := ed25519.GenerateKey(nil)
-	// if err != nil{
-	// 	return nil, fmt.Errorf("Error while creating key: %v", err)
-	// }
-	// s.PrivateKey = private_key
-	// s.PublicKey = public_key
-
-	// create key
-	// s.key = createRandomAES128Key()
-	// block, err := aes.NewCipher(createRandomAES128Key())
-
-	// err = s.NewKey()
-    // if err != nil{
-	// 	return nil, err
-    // }
-
-	s.key = createRandomKey()
+	s.NewKey()
 
 	return s, nil
 }
 
-// TODO random new key
-func (s *Server) NewKey() error {
-	block, err := aes.NewCipher(createRandomAES128Key())
-    if err != nil{
-		return fmt.Errorf("Error while creating new key: %v", err)
-    }
-	s.block = block
-	return nil
+func (s *Server) NewKey() {
+	s.key = createRandomKey()
 }
 
 // server methods
-
 func (s Server) Listen() error {
 	// TODO: listen until channel says stop?
 	for {
@@ -142,6 +106,7 @@ func (s Server) Listen() error {
 
 func (s Server) handleMDR(msg messages.MDR, addr *net.UDPAddr){
 	// - MDR: check token, lookup file id (= hash out of path + last modified), filesize, checksum
+	// if !s.checkToken(addr, )
 
 }
 
@@ -158,26 +123,6 @@ func (s Server) createToken(addr *net.UDPAddr) [32]byte {
 	copy(data[:len(ip_port_bytes)], ip_port_bytes)
 	copy(data[len(ip_port_bytes):], s.key)
 	return sha256.Sum256(data)
-
-
-	// cipherText := make([]byte, aes.BlockSize+len(ip_port_bytes))
-
-	// iv := cipherText[:aes.BlockSize]
-	// _, err := io.ReadFull(rand.Reader, iv)
-
-	// if err != nil {
-	// 	return nil, fmt.Errorf("Error while putting random data into cipher text: %v", err)
-	// }
-
-	// // encrypt
-	// stream := cipher.NewCFBEncrypter(s.block, iv)
-	// stream.XORKeyStream(cipherText[aes.BlockSize:], ip_port_bytes)
-
-	// padded := make([]byte, 256)
-	// copy(padded[:len(cipherText)], cipherText)
-
-	// // convert to fixed size array
-	// return (*[256]byte)(padded), nil
 }
 
 func (s Server) checkToken(addr *net.UDPAddr, Token *[32]uint8) bool{
