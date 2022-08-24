@@ -55,32 +55,32 @@ func ParseClient(data *[]byte) (ClientMessage, error) {
 		var mdr MDR
 		// parse client header
 		var client_header ClientHeader
-		err = binary.Read(bytes.NewBuffer(d[:259]), binary.BigEndian, &client_header)
+		err = binary.Read(bytes.NewBuffer(d[:35]), binary.BigEndian, &client_header)
 		mdr.Header = client_header
 		// parse string seperatly
-		mdr.URI = string(d[259:])
+		mdr.URI = string(d[35:])
 		parsed_data = mdr
 
 	case ACR_t:
 		var acr ACR
-		err = binary.Read(bytes.NewBuffer(d[:259]), binary.BigEndian, &acr.Header)
+		err = binary.Read(bytes.NewBuffer(d[:35]), binary.BigEndian, &acr.Header)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read: %v", err)
 		}
-		err = binary.Read(bytes.NewBuffer(d[259:259+4]), binary.BigEndian, &acr.FileID)
+		err = binary.Read(bytes.NewBuffer(d[35:35+4]), binary.BigEndian, &acr.FileID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read: %v", err)
 		}
-		err = binary.Read(bytes.NewBuffer(d[259+4:267]), binary.BigEndian, &acr.PacketRate)
+		err = binary.Read(bytes.NewBuffer(d[35+4:43]), binary.BigEndian, &acr.PacketRate)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read: %v", err)
 		}
 
-		acr.CRs = make([]CR, (len(d) - 267)/7)
+		acr.CRs = make([]CR, (len(d) - 43)/7)
 
-		for i:=0; i < (len(d) - 267)/7; i++{
+		for i:=0; i < (len(d) - 43)/7; i++{
 			// var cr CR
-			err = binary.Read(bytes.NewBuffer(d[267+7*i:267+7*i+7]), binary.BigEndian, &acr.CRs[i])
+			err = binary.Read(bytes.NewBuffer(d[43+7*i:43+7*i+7]), binary.BigEndian, &acr.CRs[i])
 			if err != nil {
 				return nil, fmt.Errorf("failed to read: %v", err)
 			}

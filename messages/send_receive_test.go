@@ -17,11 +17,11 @@ import (
 //     return token
 // }
 
-func createRandomToken() *[256]uint8{
-    token := make([]uint8, 256)
+func createRandomToken() *[32]uint8{
+    token := make([]uint8, 32)
     rand.Read(token)
     // slice to array
-    return (*[256]uint8)(token)
+    return (*[32]uint8)(token)
 }
 
 func createTestServerAndClient(t *testing.T) (*net.UDPConn, *net.UDPConn, *net.UDPAddr){
