@@ -14,7 +14,7 @@ const VERS uint8 = 0
 const (
 	NTM_t  uint8 = 0
 	MDRR_t uint8 = 2
-	CRR_t 		 = 4
+	CRR_t		 = 4
 )
 
 
@@ -40,6 +40,10 @@ func Int2uint8_6_arr(a uint64) *[6]uint8 {
     return (*[6]uint8)(b[:6])
 }
 
+func Uint8_6_arr2int(a *[6]uint8) uint64 {
+	b := append(a[:], 0, 0)
+	return binary.LittleEndian.Uint64(b)
+}
 
 type ServerMessage interface {
 	Send(conn *net.UDPConn, addr *net.UDPAddr) error
