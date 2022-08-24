@@ -3,7 +3,6 @@ package client
 import (
 	"errors"
 	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
@@ -25,7 +24,7 @@ type fileMetadata struct {
 
 	// Information on missing chunks
 
-	chunkMap map[int64]bool //chunkMap[chunk] == true iff chunk has been received
+	chunkMap map[uint64]bool //chunkMap[chunk] == true iff chunk has been received
 	firstMissing uint64 // The index of the first chunk not yet received
 
 	// Information on the connection
@@ -156,7 +155,7 @@ func getMetadata(conn *net.UDPConn, URL string, retransmissions int, timeout tim
 				metadata.chunkSize = mdrr.ChunkSize
 				metadata.maxChunksInACR = mdrr.MaxChunksInACR
 				metadata.fileID = mdrr.FileID
-				metadata.fileSize = binary.LittleEndian.Uint64(mdrr.FileSize[:])
+				metadata.fileSize = messages.Uint8_6_arr2int(&mdrr.FileSize)
 				metadata.checksum = mdrr.Checksum
 
 				// Get metadata from RTT
@@ -165,7 +164,7 @@ func getMetadata(conn *net.UDPConn, URL string, retransmissions int, timeout tim
 				// TODO: Decide on initial packet rate or make it configurable
 				metadata.packetRate = 1
 
-				// metadata.chunkMap and metadata.firstMissing are already set to 0
+				metadata.chunkMap = make(map[uint64]bool, metadata.fileSize)
 				return metadata, nil
 			default:
 				continue receive
@@ -180,10 +179,44 @@ func getMetadata(conn *net.UDPConn, URL string, retransmissions int, timeout tim
 // This function also receives the CRRs, write them to localFile, update the
 // chunkMap and perform packet rate measurements.
 func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.File) error {
+	// Build an ACR
+	acr, requested := buildACR(metadata)
+	_, _ = acr, requested
 	// TODO Send File chunk request for missing chunks
 	// TODO Receive chunks and write them to memory
 	// TODO update measured rate and timeout
 	return nil
+}
+
+// Build an ACR to request the missing chunks according to metadata.chunkMap
+func buildACR(metadata *fileMetadata) (acr *messages.ACR, requested []uint64) {
+	chunksInACR := 0
+	requested = []uint64{}
+	chunkRequests := []messages.CR{}
+	offset := metadata.firstMissing
+	for chunksInACR < int(metadata.maxChunksInACR) && offset < metadata.fileSize {
+		requested = append(requested, offset)
+		length := 1
+		// Find longest length of missing chunks starting from offset 
+		for uint64(length)+offset < metadata.fileSize &&
+		length < int(metadata.maxChunksInACR)-chunksInACR &&
+		length < 255 &&
+		!metadata.chunkMap[uint64(length)+offset] {
+			requested = append(requested, uint64(length)+offset)
+			length++
+		}
+		// Create the corresponding CR
+		chunkRequests = append(chunkRequests, *messages.GetCR(*messages.Int2uint8_6_arr(offset), uint8(length)))
+		chunksInACR += length
+		// Find the next offset of a missing chunk
+		offset += uint64(length)
+		for metadata.chunkMap[offset] {
+			offset ++
+		}
+	}
+	// Create the ACR
+	acr = messages.GetACR(messageCounter, &metadata.token, metadata.fileID, metadata.packetRate, &chunkRequests)
+	return
 }
 
 func computeChecksum(filename string) ([32]byte, error) {
