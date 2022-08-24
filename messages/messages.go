@@ -53,7 +53,7 @@ type ClientHeader struct {
 	Version uint8
 	Type    uint8
 	Number  uint8
-	Token   [256]uint8
+	Token   [32]uint8
 }
 
 type ServerHeader struct {
@@ -65,10 +65,10 @@ type ServerHeader struct {
 
 type NTM struct {
 	Header ServerHeader
-	Token  [256]uint8
+	Token  [32]uint8
 }
 
-func GetNTM(number uint8, err uint8, token *[256]uint8) *NTM{
+func GetNTM(number uint8, err uint8, token *[32]uint8) *NTM{
 	ntm := new(NTM)
 	ntm.Header = ServerHeader{Version: VERS, Type: NTM_t, Number: number, Error: err}
 	ntm.Token = *token
@@ -80,7 +80,7 @@ type MDR struct {
 	URI    string /* this must be handled manualy when sending */
 }
 
-func GetMDR(number uint8, token *[256]uint8, uri string) *MDR{
+func GetMDR(number uint8, token *[32]uint8, uri string) *MDR{
 	mdr := new(MDR)
 	mdr.Header = ClientHeader{Version: VERS, Type: MDR_t, Number: number, Token: *token}
 	mdr.URI = uri
@@ -93,11 +93,11 @@ type MDRR struct {
 	MaxChunksInACR uint16
 	FileID         uint32
 	FileSize       [6]uint8 /* alias, there is no uint48 :-( */
-	Checksum       [256]uint8
+	Checksum       [32]uint8
 }
 
 func GetMDRR(number uint8, err uint8, chunk_size uint16,
-			max_chunks_in_acr uint16, fileid uint32, filesize [6]uint8, checksum *[256]uint8) *MDRR{
+			max_chunks_in_acr uint16, fileid uint32, filesize [6]uint8, checksum *[32]uint8) *MDRR{
 	mdrr := new(MDRR)
 	mdrr.Header = ServerHeader{Version: VERS, Type: MDRR_t, Number: number, Error: err}
 	mdrr.ChunkSize = chunk_size
@@ -127,7 +127,7 @@ type ACR struct {
 	CRs        []CR
 }
 
-func GetACR(number uint8, token *[256]uint8, fileid uint32, packet_rate uint32, crlist *[]CR) *ACR{
+func GetACR(number uint8, token *[32]uint8, fileid uint32, packet_rate uint32, crlist *[]CR) *ACR{
 	acr := new(ACR)
 	acr.Header = ClientHeader{Version: VERS, Type: ACR_t, Number: number, Token: *token}
 	acr.FileID = fileid
