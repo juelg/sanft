@@ -1,6 +1,7 @@
 package client
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -14,12 +15,12 @@ import (
 type fileMetadata struct {
 	// Metadata from the metadata request
 
-	token [256]uint8
+	token [32]uint8
 	chunkSize uint16
 	maxChunksInACR uint16
 	fileID uint32
 	fileSize uint64
-	checksum [256]byte
+	checksum [32]byte
 
 	// Information on missing chunks
 
@@ -153,9 +154,15 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 	return nil
 }
 
-func computeChecksum(filename string) ([256]byte, error) {
-	var hash [256]byte
-	// TODO compute checksum of file
+func computeChecksum(filename string) ([32]byte, error) {
+	var hash [32]byte
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return hash, fmt.Errorf("Compute checksum: %v", err)
+	}
+	h := sha256.New()
+	h.Write(data)
+	copy(hash[:], h.Sum(nil))
 
 	return hash, nil
 }
