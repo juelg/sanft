@@ -23,4 +23,11 @@ func TestToken(t *testing.T){
 
 	var false_token [32]uint8
 	assert.False(t,s.checkToken(&addr, &false_token), "Token match but should miss match")
+
+	addr2 := net.UDPAddr{
+		Port: 1001,
+		IP:   net.ParseIP("127.100.0.1"),
+	}
+	// slighly changed address should also result into chack=false
+	assert.False(t,s.checkToken(&addr2, &token), "Token match but should miss match")
 }

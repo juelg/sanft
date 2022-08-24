@@ -22,18 +22,12 @@ type Server struct {
 	FileIDMap map[string]string
 
 	// keying material
-	key []byte
+	key []uint8
 }
 
 
-func createRandomKey() []byte{
-    key := make([]byte, 256)
-    rand.Read(key)
-    return key
-}
-
-func createRandomAES128Key() []byte{
-    key := make([]byte, 16)
+func createRandomKey() []uint8{
+    key := make([]uint8, 256)
     rand.Read(key)
     return key
 }
@@ -106,17 +100,31 @@ func (s Server) Listen() error {
 
 func (s Server) handleMDR(msg messages.MDR, addr *net.UDPAddr){
 	// - MDR: check token, lookup file id (= hash out of path + last modified), filesize, checksum
-	// if !s.checkToken(addr, )
+	if !s.checkToken(addr, &msg.Header.Token){
+		s.sendNTM(msg.Header.Number, messages.NoError, addr)
+		return
+	}
+	
 
 }
 
 func (s Server) handleACR(msg messages.ACR, addr *net.UDPAddr){
 	// - ACR: check token, read file chunk
+	if !s.checkToken(addr, &msg.Header.Token){
+		s.sendNTM(msg.Header.Number, messages.NoError, addr)
+		return
+	}
 
 }
 
+func (s Server) sendNTM(number uint8, err uint8, addr *net.UDPAddr){
+	token := s.createToken(addr)
+	ntm := messages.GetNTM(number, err, &token)
+	ntm.Send(s.Conn, addr)
+}
 
-func (s Server) createToken(addr *net.UDPAddr) [32]byte {
+
+func (s Server) createToken(addr *net.UDPAddr) [32]uint8 {
 	ip_port_bytes := getPortIPBytes(addr)
 
 	data := make([]byte, len(ip_port_bytes) + len(s.key))
