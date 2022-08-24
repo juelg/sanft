@@ -9,13 +9,15 @@ import (
 )
 
 var (
-	host       = kingpin.Arg("host", "The host to request from (hostname or IPv4 address).").ResolvedIP()
-	serverMode = kingpin.Flag("server", "Server mode: accept incoming requests from any host. Operate in client mode if “-s” is not specified.").Short('s').Default("false").Bool()
-	port       = kingpin.Flag("port", "Specify the port number to use (use 1337 as default if not given).").Default("1337").Short('t').Int()
-	markovP    = kingpin.Flag("p", "Specify the loss probabilities for the Markov chain model.").Short('p').Int()
-	markovQ    = kingpin.Flag("q", "Specify the loss probabilities for the Markov chain model.").Short('q').Int()
-	fileDir    = kingpin.Flag("file-dir", "Specify the directory containing the files that the server should serve.").Short('d').Default("/var/www/sanft").ExistingDir()
-	files      = kingpin.Arg("files", "The name of the file(s) to fetch.").Strings()
+	host           = kingpin.Arg("host", "The host to request from (hostname or IPv4 address).").ResolvedIP()
+	serverMode     = kingpin.Flag("server", "Server mode: accept incoming requests from any host. Operate in client mode if “-s” is not specified.").Short('s').Default("false").Bool()
+	port           = kingpin.Flag("port", "Specify the port number to use (use 1337 as default if not given).").Default("1337").Short('t').Int()
+	markovP        = kingpin.Flag("p", "Specify the loss probabilities for the Markov chain model.").Short('p').Int()
+	markovQ        = kingpin.Flag("q", "Specify the loss probabilities for the Markov chain model.").Short('q').Int()
+	fileDir        = kingpin.Flag("file-dir", "Specify the directory containing the files that the server should serve.").Short('d').Default("/var/www/sanft").ExistingDir()
+	chunkSize      = kingpin.Flag("chunk-size", "The chunk size advertised and used by the server.").Default("4048").Int()
+	maxChunksInACR = kingpin.Flag("max-chunks-in-acr", "The maximum number of chunks in an ACR allowed by the server.").Default("128").Int()
+	files          = kingpin.Arg("files", "The name of the file(s) to fetch.").Strings()
 )
 
 func main() {
@@ -55,7 +57,7 @@ func main() {
 	defer conn.Close()
 
 	/* Send an NTM message */
-	Token := [256]uint8{1, 2, 3, 4, 5}
+	Token := [32]uint8{1, 2, 3, 4, 5}
 	sh := messages.ServerHeader{Number: 5}
 	m0 := messages.NTM{Header: sh, Token: Token}
 	err = m0.Send(conn, &laddr)
