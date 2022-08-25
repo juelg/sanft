@@ -14,7 +14,7 @@ func CreateServerSocket(ip string, port int) (*net.UDPConn, error){
 	}
 	conn, err := net.ListenUDP("udp", &laddr)
 	if err != nil {
-		return nil, fmt.Errorf("error creating ListenUDP: %v", err)
+		return nil, fmt.Errorf("error creating ListenUDP: %w", err)
 	}
 	return conn, nil
 }
@@ -22,13 +22,13 @@ func CreateServerSocket(ip string, port int) (*net.UDPConn, error){
 func CreateClientSocket(address string, port int) (*net.UDPConn, error){
 	raddr, err := net.ResolveUDPAddr("udp", address + ":" + fmt.Sprint(port))
 	if err != nil {
-		return nil, fmt.Errorf("error resolving addr: %v", err)
+		return nil, fmt.Errorf("error resolving addr: %w", err)
 	}
 
 	// this automatically takes local laddr
 	conn, err := net.DialUDP("udp", nil, raddr)
 	if err != nil {
-		return nil, fmt.Errorf("error dialing to server: %v", err)
+		return nil, fmt.Errorf("error dialing to server: %w", err)
 	}
 	return conn, nil
 }

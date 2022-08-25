@@ -1,11 +1,12 @@
 package messages
 
 import (
+	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 	"testing"
-	"math/rand"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -229,5 +230,228 @@ func TestTimeout(t *testing.T){
     }
     if err == nil{
         t.Fatalf(`This receive should actually time out!`)
+    }
+}
+
+// test invalid requests which should lead to parsing errors
+
+func TestPacketHeaderTooSmall(t *testing.T){
+    conn_server, conn_client, addr := createTestServerAndClient(t)
+    defer conn_client.Close()
+    defer conn_server.Close()
+
+    data := make([]uint8, 2)
+
+    // server header on client side
+	_, err := conn_server.WriteToUDP(data, addr)
+    if err != nil{
+        t.Fatalf(`Error while sending on server: %v`, err)
+    }
+    var e *WrongPacketLengthError
+    datar, err := ClientReceive(conn_client, 10000)
+    if err != nil{
+        t.Fatalf(`Error while receiving on client: %v`, err)
+    }
+
+    _, err = ParseServer(&datar)
+    if !errors.As(err, &e){
+        t.Fatalf(`Error should be WrongPacketLengthError but is: %v`, err)
+    }
+
+    // client header on server side
+	_, err = conn_client.Write(data)
+    if err != nil{
+        t.Fatalf(`Error while sending on client: %v`, err)
+    }
+    _, datar, err = ServerReceive(conn_server)
+    if err != nil{
+        t.Fatalf(`Error while receiving on client: %v`, err)
+    }
+
+    _, err = ParseClient(&datar)
+    if !errors.As(err, &e){
+        t.Fatalf(`Error should be WrongPacketLengthError but is: %v`, err)
+    }
+}
+
+
+func TestWrongPacketType(t *testing.T){
+    conn_server, conn_client, addr := createTestServerAndClient(t)
+    defer conn_client.Close()
+    defer conn_server.Close()
+
+    data := make([]uint8, 4)
+    data[1] = 5
+
+    // server header on client side
+	_, err := conn_server.WriteToUDP(data, addr)
+    if err != nil{
+        t.Fatalf(`Error while sending on server: %v`, err)
+    }
+    var e *UnsupporedTypeError
+    datar, err := ClientReceive(conn_client, 10000)
+    if err != nil{
+        t.Fatalf(`Error while receiving on client: %v`, err)
+    }
+
+    _, err = ParseServer(&datar)
+    if !errors.As(err, &e){
+        t.Fatalf(`Error should be WrongPacketLengthError but is: %v`, err)
+    }
+
+    // client header on server side
+    data = make([]uint8, 35)
+    data[1] = 5
+
+	_, err = conn_client.Write(data)
+    if err != nil{
+        t.Fatalf(`Error while sending on client: %v`, err)
+    }
+    _, datar, err = ServerReceive(conn_server)
+    if err != nil{
+        t.Fatalf(`Error while receiving on client: %v`, err)
+    }
+
+    _, err = ParseClient(&datar)
+    if !errors.As(err, &e){
+        t.Fatalf(`Error should be WrongPacketLengthError but is: %v`, err)
+    }
+}
+
+
+func TestUnsupporedVersion(t *testing.T){
+    conn_server, conn_client, addr := createTestServerAndClient(t)
+    defer conn_client.Close()
+    defer conn_server.Close()
+
+    data := make([]uint8, 4)
+    data[0] = 1
+
+    // server header on client side
+	_, err := conn_server.WriteToUDP(data, addr)
+    if err != nil{
+        t.Fatalf(`Error while sending on server: %v`, err)
+    }
+    var e *UnsupporedVersionError
+    datar, err := ClientReceive(conn_client, 10000)
+    if err != nil{
+        t.Fatalf(`Error while receiving on client: %v`, err)
+    }
+
+    _, err = ParseServer(&datar)
+    if !errors.As(err, &e){
+        t.Fatalf(`Error should be WrongPacketLengthError but is: %v`, err)
+    }
+
+    // client header on server side
+    data = make([]uint8, 35)
+    data[0] = 1
+
+	_, err = conn_client.Write(data)
+    if err != nil{
+        t.Fatalf(`Error while sending on client: %v`, err)
+    }
+    _, datar, err = ServerReceive(conn_server)
+    if err != nil{
+        t.Fatalf(`Error while receiving on client: %v`, err)
+    }
+
+    _, err = ParseClient(&datar)
+    if !errors.As(err, &e){
+        t.Fatalf(`Error should be WrongPacketLengthError but is: %v`, err)
+    }
+}
+
+func TestClientSpecificPacketLength(t *testing.T){
+    conn_server, conn_client, _ := createTestServerAndClient(t)
+    defer conn_client.Close()
+    defer conn_server.Close()
+
+    data := make([]uint8, 35)
+    data[1] = MDR_t
+
+
+	_, err := conn_client.Write(data)
+    if err != nil{
+        t.Fatalf(`Error while sending on client: %v`, err)
+    }
+    _, datar, err := ServerReceive(conn_server)
+    if err != nil{
+        t.Fatalf(`Error while receiving on server: %v`, err)
+    }
+
+    var e *WrongPacketLengthError
+    _, err = ParseClient(&datar)
+    if !errors.As(err, &e){
+        t.Fatalf(`Error should be WrongPacketLengthError but is: %v`, err)
+    }
+    data[1] = ACR_t
+
+	_, err = conn_client.Write(data)
+    if err != nil{
+        t.Fatalf(`Error while sending on client: %v`, err)
+    }
+    _, datar, err = ServerReceive(conn_server)
+    if err != nil{
+        t.Fatalf(`Error while receiving on server: %v`, err)
+    }
+
+    _, err = ParseClient(&datar)
+    if !errors.As(err, &e){
+        t.Fatalf(`Error should be WrongPacketLengthError but is: %v`, err)
+    }
+}
+func TestServerSpecificPacketLength(t *testing.T){
+    conn_server, conn_client, addr := createTestServerAndClient(t)
+    defer conn_client.Close()
+    defer conn_server.Close()
+
+    data := make([]uint8, 4)
+    data[1] = NTM_t
+
+
+	_, err := conn_server.WriteToUDP(data, addr)
+    if err != nil{
+        t.Fatalf(`Error while sending on server: %v`, err)
+    }
+    datar, err := ClientReceive(conn_client, 10000)
+    if err != nil{
+        t.Fatalf(`Error while receiving on client: %v`, err)
+    }
+
+    var e *WrongPacketLengthError
+    _, err = ParseServer(&datar)
+    if !errors.As(err, &e){
+        t.Fatalf(`Error should be WrongPacketLengthError but is: %v`, err)
+    }
+    data[1] = MDRR_t
+
+	_, err = conn_server.WriteToUDP(data, addr)
+    if err != nil{
+        t.Fatalf(`Error while sending on server: %v`, err)
+    }
+    datar, err = ClientReceive(conn_client, 10000)
+    if err != nil{
+        t.Fatalf(`Error while receiving on client: %v`, err)
+    }
+
+    _, err = ParseServer(&datar)
+    if !errors.As(err, &e){
+        t.Fatalf(`Error should be WrongPacketLengthError but is: %v`, err)
+    }
+    data[1] = CRR_t
+
+	_, err = conn_server.WriteToUDP(data, addr)
+    if err != nil{
+        t.Fatalf(`Error while sending on server: %v`, err)
+    }
+    datar, err = ClientReceive(conn_client, 10000)
+    if err != nil{
+        t.Fatalf(`Error while receiving on client: %v`, err)
+    }
+
+    _, err = ParseServer(&datar)
+    if !errors.As(err, &e){
+        t.Fatalf(`Error should be WrongPacketLengthError but is: %v`, err)
     }
 }
