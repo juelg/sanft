@@ -32,9 +32,8 @@ type fileMetadata struct {
 
 	timeout time.Duration
 	packetRate uint32
+	messageCounter uint8
 }
-
-var messageCounter uint8
 
 // General TODO : Check error handling at each step. For now nothing happens
 // when the server sends an error for example.
@@ -93,6 +92,7 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 func getMetadata(conn *net.UDPConn, URL string, retransmissions int, timeout time.Duration) (*fileMetadata, error) {
 	var buf []byte
 	metadata := new(fileMetadata)
+	var messageCounter uint8
 	// Send a Metadatarequest with a zero token
 	// It will probably (certainly) be invalid but in that case just take the 
 	mdr := messages.GetMDR(messageCounter, &metadata.token, URL)
@@ -164,6 +164,7 @@ func getMetadata(conn *net.UDPConn, URL string, retransmissions int, timeout tim
 				metadata.timeout = time.Since(t_send) * 3
 				// TODO: Decide on initial packet rate or make it configurable
 				metadata.packetRate = 1
+				metadata.messageCounter = messageCounter
 
 				metadata.chunkMap = make(map[uint64]bool, metadata.fileSize)
 				return metadata, nil
@@ -238,16 +239,16 @@ func buildACR(metadata *fileMetadata) (acr *messages.ACR, requested []uint64) {
 		}
 	}
 	// Create the ACR
-	acr = messages.GetACR(messageCounter, &metadata.token, metadata.fileID, metadata.packetRate, &chunkRequests)
-	messageCounter ++
+	acr = messages.GetACR(metadata.messageCounter, &metadata.token, metadata.fileID, metadata.packetRate, &chunkRequests)
+	metadata.messageCounter ++
 	return
 }
 
-//computePacketRate computes a new packet rate from:
-//	- timeReceiveCRR: a map that contains the time each CRR was received at.
-//	They are indexed by their position in the ACR that caused the response.
-//	- n_expected: Number of expected packets
-//	- packetRate: the packetRate field of the ACR that caused the response.
+// computePacketRate computes a new packet rate from:
+//   - timeReceiveCRR: a map that contains the time each CRR was received at.
+//     They are indexed by their position in the ACR that caused the response.
+//   - n_expected: Number of expected packets
+//   - packetRate: the packetRate field of the ACR that caused the response.
 func computePacketRate(timeReceiveCRR map[int]time.Time, n_expected int, packetRate uint32) (uint32, error) {
 	if packetRate == 0 {
 		return 0, fmt.Errorf("packetRate must be positive")
@@ -256,56 +257,49 @@ func computePacketRate(timeReceiveCRR map[int]time.Time, n_expected int, packetR
 		return 0, fmt.Errorf("Can only compute a packetRate if more than 2 packets were expected")
 	}
 	var timeFirst, timeLast time.Time
-	var indexFirst, indexLast int
+	indexFirst := -1
+	indexLast := -1
 	n_received := 0
-	for i:=0; i<n_expected; i++ {
+	for i := 0; i < n_expected; i++ {
 		when, received := timeReceiveCRR[i]
 		if received {
-			n_received ++
-			if timeFirst.IsZero() || when.Before(timeFirst) {
+			n_received++
+			if indexFirst == -1 {
 				timeFirst = when
 				indexFirst = i
 			}
-			if timeLast.IsZero() || when.After(timeLast) {
-				timeLast = when
-				indexLast = i
-			}
+			timeLast = when
+			indexLast = i
 		}
 	}
 	if n_received == 0 {
 		return 0, fmt.Errorf("Cannot measure a rate when no packet was received")
-	}
-	if n_received == 1 {
-		// We cannot compute a packet Rate if only one packet was received
-		// For now I'm just dividing the old packetRate by the number of expected
-		// packets (multiplicative decrease).
-		newPacketRate := packetRate/uint32(n_expected)
-		if newPacketRate >= 1 {
-			return newPacketRate, nil
-		} else {
-			return 1, nil
-		}
 	}
 
 	var estimatedFirst, estimatedLast time.Time
 	if indexFirst == 0 {
 		estimatedFirst = timeFirst
 	} else {
-		estimatedFirst = timeFirst.Add(-time.Duration(uint64(indexFirst)*uint64(time.Second)/uint64(packetRate)))
+		estimatedFirst = timeFirst.Add(-time.Duration(uint64(indexFirst) * uint64(time.Second) / uint64(packetRate)))
 	}
-	if indexLast == n_expected - 1 {
+	if indexLast == n_expected-1 {
 		estimatedLast = timeLast
 	} else {
-		estimatedLast = timeLast.Add(time.Duration(uint64(n_expected-1 - indexLast)*uint64(time.Second)/uint64(packetRate)))
+		estimatedLast = timeLast.Add(time.Duration(uint64(n_expected-1-indexLast) * uint64(time.Second) / uint64(packetRate)))
 	}
-	// Sanity check
 	if !estimatedLast.After(estimatedFirst) {
-		return 0, fmt.Errorf("estimatedLast(%s) should be after estimatedFirst(%s).", estimatedLast.Format(time.StampMicro), estimatedFirst.Format(time.StampMicro))
+		// We just return an the previous rate multiplied by the ratio of received packets
+		newPacketRate := packetRate * uint32(n_received) / uint32(n_expected)
+		if newPacketRate > 0 {
+			return newPacketRate, nil
+		} else {
+			return 1, nil
+		}
 	}
-	measuredRate := float64(n_received-1)/estimatedLast.Sub(estimatedFirst).Abs().Seconds()
+	measuredRate := float64(n_received) / estimatedLast.Sub(estimatedFirst).Abs().Seconds()
 	// Do some sanity checks to avoid an overflow
 	if measuredRate > float64(math.MaxUint32) {
-		// It's probably not a good idea to request a packetRate that large but 
+		// It's probably not a good idea to request a packetRate that large but
 		// this function doesn't have such considerations ¯\_(ツ)_/¯
 		return math.MaxUint32, nil
 	}
