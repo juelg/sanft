@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"time"
+	"math"
 
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 )
@@ -105,7 +106,7 @@ func getMetadata(conn *net.UDPConn, URL string, retransmissions int, timeout tim
 		if err != nil {
 			// TODO : differentiate between multiple errors
 			// I assumed broken pipe, thus the exit but there might be other ones
-			return nil, fmt.Errorf("Send MDR with invalid token: %w", err)
+			return nil, fmt.Errorf("Send MDR: %w", err)
 		}
 		deadline := t_send.Add(timeout)
 		err = conn.SetReadDeadline(deadline)
@@ -179,12 +180,34 @@ func getMetadata(conn *net.UDPConn, URL string, retransmissions int, timeout tim
 // This function also receives the CRRs, write them to localFile, update the
 // chunkMap and perform packet rate measurements.
 func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.File) error {
-	// Build an ACR
+	// Build an ACR and send it
 	acr, requested := buildACR(metadata)
-	_, _ = acr, requested
-	// TODO Send File chunk request for missing chunks
-	// TODO Receive chunks and write them to memory
-	// TODO update measured rate and timeout
+	n_cr := len(requested)
+	t_send := time.Now()
+	err := acr.Send(conn)
+	if err != nil {
+		return fmt.Errorf("Send ACR: %w", err)
+	}
+	deadline := t_send.Add(metadata.timeout)
+	err = conn.SetReadDeadline(deadline)
+	if err != nil {
+		return fmt.Errorf("Set deadline: %w", err)
+	}
+	mapTimeCRRs := make(map[int]time.Time)
+	received := false
+	for time.Now().Before(deadline) {
+		// TODO Receive chunks and write them to memory
+	}
+	if received {
+		newPacketRate, err := computePacketRate(mapTimeCRRs, n_cr, metadata.packetRate)
+		if err != nil {
+			return fmt.Errorf("compute new packetRate: %w", err)
+		}
+		metadata.packetRate = newPacketRate
+	} else {
+		// Exponential backoff
+		metadata.timeout *= 2
+	}
 	return nil
 }
 
@@ -216,7 +239,83 @@ func buildACR(metadata *fileMetadata) (acr *messages.ACR, requested []uint64) {
 	}
 	// Create the ACR
 	acr = messages.GetACR(messageCounter, &metadata.token, metadata.fileID, metadata.packetRate, &chunkRequests)
+	messageCounter ++
 	return
+}
+
+//computePacketRate computes a new packet rate from:
+//	- timeReceiveCRR: a map that contains the time each CRR was received at.
+//	They are indexed by their position in the ACR that caused the response.
+//	- n_expected: Number of expected packets
+//	- packetRate: the packetRate field of the ACR that caused the response.
+func computePacketRate(timeReceiveCRR map[int]time.Time, n_expected int, packetRate uint32) (uint32, error) {
+	if packetRate == 0 {
+		return 0, fmt.Errorf("packetRate must be positive")
+	}
+	if n_expected <= 1 {
+		return 0, fmt.Errorf("Can only compute a packetRate if more than 2 packets were expected")
+	}
+	var timeFirst, timeLast time.Time
+	var indexFirst, indexLast int
+	n_received := 0
+	for i:=0; i<n_expected; i++ {
+		when, received := timeReceiveCRR[i]
+		if received {
+			n_received ++
+			if timeFirst.IsZero() || when.Before(timeFirst) {
+				timeFirst = when
+				indexFirst = i
+			}
+			if timeLast.IsZero() || when.After(timeLast) {
+				timeLast = when
+				indexLast = i
+			}
+		}
+	}
+	if n_received == 0 {
+		return 0, fmt.Errorf("Cannot measure a rate when no packet was received")
+	}
+	if n_received == 1 {
+		// We cannot compute a packet Rate if only one packet was received
+		// For now I'm just dividing the old packetRate by the number of expected
+		// packets (multiplicative decrease).
+		newPacketRate := packetRate/uint32(n_expected)
+		if newPacketRate >= 1 {
+			return newPacketRate, nil
+		} else {
+			return 1, nil
+		}
+	}
+
+	var estimatedFirst, estimatedLast time.Time
+	if indexFirst == 0 {
+		estimatedFirst = timeFirst
+	} else {
+		estimatedFirst = timeFirst.Add(-time.Duration(uint64(indexFirst)*uint64(time.Second)/uint64(packetRate)))
+	}
+	if indexLast == n_expected - 1 {
+		estimatedLast = timeLast
+	} else {
+		estimatedLast = timeLast.Add(time.Duration(uint64(n_expected-1 - indexLast)*uint64(time.Second)/uint64(packetRate)))
+	}
+	// Sanity check
+	if !estimatedLast.After(estimatedFirst) {
+		return 0, fmt.Errorf("estimatedLast(%s) should be after estimatedFirst(%s).", estimatedLast.Format(time.StampMicro), estimatedFirst.Format(time.StampMicro))
+	}
+	measuredRate := float64(n_received-1)/estimatedLast.Sub(estimatedFirst).Abs().Seconds()
+	// Do some sanity checks to avoid an overflow
+	if measuredRate > float64(math.MaxUint32) {
+		// It's probably not a good idea to request a packetRate that large but 
+		// this function doesn't have such considerations ¯\_(ツ)_/¯
+		return math.MaxUint32, nil
+	}
+	if measuredRate < 1.0 {
+		return 1, nil
+	}
+	if math.IsNaN(measuredRate) {
+		return 0, fmt.Errorf("Measured rate is NaN.")
+	}
+	return uint32(measuredRate), nil
 }
 
 func computeChecksum(filename string) ([32]byte, error) {

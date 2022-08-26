@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 )
@@ -111,5 +112,79 @@ func TestChecksum(t *testing.T) {
 
 	if hash1 != hash2 {
 		t.Fatalf("Invalid checksum. Expected %x got %x", hash1, hash2)
+	}
+}
+
+func TestComputePacketRate(t *testing.T) {
+	n_expected := 40
+	timeMap := make(map[int]time.Time)
+	prevRate := uint32(20)
+	t0 := time.Now()
+
+	for i:=0; i<n_expected; i++ {
+		timeMap[i] = t0.Add(time.Duration(i*int(time.Second)/int(prevRate)))
+	}
+
+	newRate, err := computePacketRate(timeMap, n_expected, prevRate);
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if newRate == 0 {
+		t.Fatalf("packetRate cannot be zero")
+	}
+
+	if newRate != prevRate {
+		t.Fatalf("New packetRate (%d) differ from previous packetRate (%d)", newRate, prevRate)
+	}
+}
+
+func TestComputePacketRateMissing(t *testing.T) {
+	n_expected := 324
+	timeMap := make(map[int]time.Time)
+	prevRate := uint32(2000)
+	t0 := time.Now()
+
+	for _, i := range []int{1,4,23,24,45,46} {
+		timeMap[i] = t0.Add(time.Duration(i*int(time.Second)/int(prevRate)))
+	}
+
+	newRate, err := computePacketRate(timeMap, n_expected, prevRate);
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if newRate == 0 {
+		t.Fatalf("packetRate cannot be zero")
+	}
+
+	if newRate > prevRate {
+		t.Fatalf("New packetRate (%d) is larger than previous packetRate (%d)", newRate, prevRate)
+	}
+}
+
+func TestComputePacketRateLate(t *testing.T) {
+	n_expected := 10
+	timeMap := make(map[int]time.Time)
+	prevRate := uint32(4)
+	t0 := time.Now()
+
+	for i:=0; i<n_expected; i++ {
+		timeMap[i] = t0.Add(time.Duration(i*int(time.Second)/int(prevRate)))
+	}
+
+	timeMap[0] = t0.Add(3*time.Second)
+
+	newRate, err := computePacketRate(timeMap, n_expected, prevRate);
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if newRate == 0 {
+		t.Fatalf("packetRate cannot be zero")
+	}
+
+	if newRate > prevRate {
+		t.Fatalf("New packetRate (%d) is larger than previous packetRate (%d)", newRate, prevRate)
 	}
 }
