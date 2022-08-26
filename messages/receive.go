@@ -167,6 +167,13 @@ func ParseServer(data *[]byte) (ServerMessage, error) {
 		parsed_data = ntm
 
 	case MDRR_t:
+		// If an error code is set, only return the header
+		if d[3] != NoError {
+			var header ServerHeader
+			err = binary.Read(r, binary.BigEndian, &header)
+			parsed_data = header
+			break
+		}
 		// assert packet length: header + 2*2 + 4 + 6 + 32
 		if len(d) < 50 {
 			return nil, &WrongPacketLengthError{s:fmt.Sprintf("packet too small, should be at least 50B is %d", len(d))}
@@ -176,8 +183,16 @@ func ParseServer(data *[]byte) (ServerMessage, error) {
 		parsed_data = mdrr
 
 	case CRR_t:
+		// If an error code is set, and it is not a chunkOut of bound error,
+		if d[3] != NoError && d[3] != ChunkOutOfBounds {
+			var header ServerHeader
+			err = binary.Read(r, binary.BigEndian, &header)
+			parsed_data = header
+			break
+		}
 		// assert packet length: header + 6 + >=1 (at least one data bytes)
-		if len(d) < 11 {
+		// If there is an out of bound error, there is only the offset and no data
+		if len(d) < 10 || (d[3] != ChunkOutOfBounds && len(d) < 11) {
 			return nil, &WrongPacketLengthError{s:fmt.Sprintf("packet too small, should be at least 11B is %d", len(d))}
 		}
 		var crr CRR

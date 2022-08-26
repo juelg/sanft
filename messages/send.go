@@ -7,6 +7,19 @@ import (
 	"net"
 )
 
+func (m ServerHeader) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.BigEndian, m)
+	if err != nil {
+		return fmt.Errorf("error encoding message: %w", err)
+	}
+	_, err = conn.WriteToUDP(buf.Bytes(), addr)
+	if err != nil {
+		return fmt.Errorf("error sending message: %w", err)
+	}
+	return nil
+}
+
 func (m NTM) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
 	buf := new(bytes.Buffer)
 	// TODO: we want to send big endian, right?

@@ -186,7 +186,7 @@ func TestCRR(t *testing.T){
 
 
     sdata := []uint8("asdf")
-    msg := GetCRR(2, 9, *Int2uint8_6_arr(42), &sdata)
+    msg := GetCRR(2, 0, *Int2uint8_6_arr(42), &sdata)
     err := msg.Send(conn_server, addr)
     if err != nil{
         t.Fatalf(`Error while sending message to client: %v`, err)
