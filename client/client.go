@@ -21,6 +21,7 @@ type fileMetadata struct {
 	fileID         uint32
 	fileSize       uint64
 	checksum       [32]byte
+	url            string
 
 	// Information on missing chunks
 
@@ -33,6 +34,15 @@ type fileMetadata struct {
 	packetRate     uint32
 	messageCounter uint8
 }
+
+// TODO[or not]: make this configurable
+const (
+	originalTimeout    time.Duration = 3*time.Second
+	retransmissionsMDR int = 5 // Max number of retransmissions when sending an MDR
+	rtt2timeoutFactor  int = 2 // timeout = rtt2timeoutFactor * rtt
+	initialPacketRate  uint32 = 2
+	nCRRsToWait        int = 3 // Number of virtual CRR to wait for the next CRR to arrive
+)
 
 // General TODO : Check error handling at each step. For now nothing happens
 // when the server sends an error for example.
@@ -47,12 +57,8 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 	}
 	defer conn.Close()
 
-	// TODO: make retransmissions and timeout configurable.
-	retransmissions := 5
-	timeout := 3 * time.Second
-
 	// Request file metadata
-	metadata, err := getMetadata(conn, URI, retransmissions, timeout)
+	metadata, err := getMetadata(conn, URI, retransmissionsMDR, originalTimeout)
 	if err != nil {
 		return fmt.Errorf("get metadata: %w", err)
 	}
@@ -66,7 +72,7 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 	for metadata.firstMissing <= metadata.fileSize {
 		err := getMissingChunks(conn, metadata, localFile)
 		if err != nil {
-			// TODO error handling
+			return fmt.Errorf("get missing chunks: %w", err)
 		}
 	}
 
@@ -102,8 +108,10 @@ retransmit:
 		t_send := time.Now()
 		err := mdr.Send(conn)
 		if err != nil {
-			// TODO : differentiate between multiple errors
-			// I assumed broken pipe, thus the exit but there might be other ones
+			if os.IsTimeout(err) {
+				continue retransmit
+			}
+			// If this is not a timeout, it's safer to exit to see what happened
 			return nil, fmt.Errorf("Send MDR: %w", err)
 		}
 		deadline := t_send.Add(timeout)
@@ -117,7 +125,7 @@ retransmit:
 			_, _, err := conn.ReadFromUDP(buf)
 			if err != nil {
 				if errors.Is(err, os.ErrDeadlineExceeded) {
-					// If it's a timeout retransmit
+					// If it's a timeout, retransmit
 					continue retransmit
 				} else {
 					// Otherwise ? IDK
@@ -128,17 +136,44 @@ retransmit:
 			response, err := messages.ParseServer(&buf)
 			if err != nil {
 				// This either means that:
-				//	- the message has an invalid version;
-				//	- the message type is not recognised;
-				//	- the message has not the right format for its type;
-				//		- Either because its plain invalid;
-				//	    - Or because there is an error from the server;
 				// - or binary.Read fails for some other reason
 				// TODO: Investigate on which it is and act accordingly
-				fmt.Printf("Error while parsing response: %v\nResponse:%x\n", err, buf)
+				if errors.Is(err, new(messages.UnsupporedVersionError)) {
+					// We can't do anything if we don't speak the same language
+					return nil, fmt.Errorf("parse server message: %w", err)
+				} else if errors.Is(err, new(messages.UnsupporedTypeError)) ||
+				errors.Is(err, new(messages.WrongPacketLengthError)) {
+					// TODO
+				}
+				fmt.Printf("Unknown error while parsing response: %v\nResponse:%x\nContinuing...\n", err, buf)
 				continue receive
 			}
 			switch response.(type) {
+			case messages.ServerHeader:
+				header := response.(messages.ServerHeader)
+				if header.Type != messages.MDRR_t {
+					// Ignore it
+					continue receive
+				}
+				if header.Number != mdr.Header.Number {
+					// Not for us. Ignore it
+					continue receive
+				}
+
+				switch header.Error {
+					case messages.UnsupportedVersion:
+						// The server must have set its version number to the
+						// version it supports.
+						// If we're here, we didn't get an UnsupporedVersionError
+						// by the parser, so it means it's a version we support.
+						// This is an answer to a message we sent. We only
+						// support one version. Something's not right -> Error
+						return nil, fmt.Errorf("MDRR server error: the server doesn't support our protocol version (%d) and answered with version %d", messages.VERS, header.Version)
+					case messages.FileNotFound:
+						return nil, fmt.Errorf("MDRR server error: File not found on server")
+					default:
+						return nil, fmt.Errorf("MDRR server error: Unknown error code for MDRR %d", header.Error)
+				}
 			case messages.NTM:
 				ntm := response.(messages.NTM)
 				metadata.token = ntm.Token
@@ -151,6 +186,7 @@ retransmit:
 					continue receive
 				}
 				// Get metadata from the response
+				metadata.url = URL
 				metadata.chunkSize = mdrr.ChunkSize
 				metadata.maxChunksInACR = mdrr.MaxChunksInACR
 				metadata.fileID = mdrr.FileID
@@ -158,10 +194,8 @@ retransmit:
 				metadata.checksum = mdrr.Checksum
 
 				// Get metadata from RTT
-				// TODO: Decide on multiplier for timeout or make it configurable
-				metadata.timeout = time.Since(t_send) * 3
-				// TODO: Decide on initial packet rate or make it configurable
-				metadata.packetRate = 1
+				metadata.timeout = time.Since(t_send) * time.Duration(rtt2timeoutFactor) // Sorry to all the physicists who will see this; go only accepts to multiply values of the same type
+				metadata.packetRate = initialPacketRate
 				metadata.messageCounter = messageCounter
 
 				metadata.chunkMap = make(map[uint64]bool, metadata.fileSize)
@@ -172,7 +206,7 @@ retransmit:
 		}
 
 	}
-	return nil, fmt.Errorf("Could not get metadata from server")
+	return nil, fmt.Errorf("Could not get metadata from server after %d retransmissions", retransmissionsMDR)
 }
 
 // Sends one ACR to get missing chunks.
@@ -214,6 +248,48 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 			continue
 		}
 		switch response.(type) {
+		case messages.ServerHeader:
+			header := response.(messages.ServerHeader)
+			if header.Number != acr.Header.Number {
+				// Ignore it
+				continue
+			}
+			switch header.Error {
+			case messages.UnsupportedVersion:
+				return fmt.Errorf("CRR server error: the server doesn't support our protocol version (%d) and answered with version %d", messages.VERS, header.Version)
+			case messages.InvalidFileID:
+				// Request new metadata and update it
+				newMetadata, err := getMetadata(conn, metadata.url, retransmissionsMDR, metadata.timeout)
+				if err != nil {
+					return fmt.Errorf("get metadata after invalid fileID: %w", err)
+				}
+				// Let's keep the old packetRate
+				oldPacketRate := metadata.packetRate
+				// TODO: Does this actually replace metadata with newMetadata ?
+				metadata = newMetadata
+				metadata.packetRate = oldPacketRate
+			case messages.TooManyChunks:
+				// Let's check
+				if n_cr > int(metadata.maxChunksInACR) {
+					// Our mistake... Let's throw an error to investigate
+					return fmt.Errorf("malformed ACR: we requested %d chunks in an ACR. Max is %d. (%v)", n_cr, metadata.maxChunksInACR, acr)
+				} else {
+					// TODO: Investigate (with a MDR) or ignore
+					continue
+				}
+			case messages.ZeroLengthCR:
+				// Let's check
+				for _, cr := range acr.CRs {
+					if cr.Length == 0 {
+						// Our mistake
+						return fmt.Errorf("malformed ACR: we sent a CR with length 0. (%v)", acr)
+					}
+				}
+				// TODO: Investigate (with a MDR) or ignore
+				continue
+			default:
+				return fmt.Errorf("CRR server error: Unknown error code for CRR %d", header.Error)
+			}
 		case messages.NTM:
 			ntm := response.(messages.NTM)
 			if ntm.Token != metadata.token {
@@ -240,8 +316,24 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 				// This is not a chunk we requested. Ignore it.
 				continue
 			}
+			// We need to check that there is no error
+			if crr.Header.Error != messages.NoError {
+				if crr.Header.Error != messages.ChunkOutOfBounds {
+					return fmt.Errorf("CRR server error: Unexpected Error for CRR with content: %d", crr.Header.Error)
+				}
+				// We requested a chunk out of bound. Strange...
+				// Let's do a few checks
+				if chunkNumber >= metadata.fileSize {
+					// That's our fault. Let's throw an error to investigate
+					return fmt.Errorf("malformed ACR: we requested chunk #%d for a file of size %d (%v)", chunkNumber, metadata.fileSize, acr)
+				} else {
+					// TODO: Investigate (with a MDR) or ignore
+					continue
+				}
+			}
 			received = true
 			mapTimeCRRs[chunkIndexInACR] = t_recv
+			deadline = t_recv.Add(time.Duration(uint64(nCRRsToWait)*uint64(time.Second)/uint64(metadata.packetRate)))
 
 			err = writeChunkToFile(metadata, chunkNumber, crr.Data, localFile)
 			if err != nil {
