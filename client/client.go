@@ -64,7 +64,6 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 	}
 	// Request chunks
 	for metadata.firstMissing <= metadata.fileSize {
-		// TODO congestion control
 		err := getMissingChunks(conn, metadata, localFile)
 		if err != nil {
 			// TODO error handling
@@ -180,6 +179,7 @@ retransmit:
 // This function also receives the CRRs, write them to localFile, update the
 // chunkMap and perform packet rate measurements.
 func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.File) error {
+	var buf []byte
 	// Build an ACR and send it
 	acr, requested := buildACR(metadata)
 	n_cr := len(requested)
@@ -189,14 +189,69 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 		return fmt.Errorf("Send ACR: %w", err)
 	}
 	deadline := t_send.Add(metadata.timeout)
-	err = conn.SetReadDeadline(deadline)
-	if err != nil {
-		return fmt.Errorf("Set deadline: %w", err)
-	}
 	mapTimeCRRs := make(map[int]time.Time)
 	received := false
 	for time.Now().Before(deadline) {
-		// TODO Receive chunks and write them to memory
+		err = conn.SetReadDeadline(deadline)
+		if err != nil {
+			return fmt.Errorf("Set deadline: %w", err)
+		}
+		_, _, err := conn.ReadFromUDP(buf)
+		t_recv := time.Now()
+		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				// If it's a timeout, continue in case the deadline was extended
+				continue
+			} else {
+				// TODO: Add error handling for other errors
+				return fmt.Errorf("Read from UDP: %w", err)
+			}
+		}
+		response, err := messages.ParseServer(&buf)
+		if err != nil {
+			// TODO: Error handling
+			fmt.Printf("Error while parsing response: %v\nResponse:%x\n", err, buf)
+			continue
+		}
+		switch response.(type) {
+		case messages.NTM:
+			ntm := response.(messages.NTM)
+			if ntm.Token != metadata.token {
+				metadata.token = ntm.Token
+				return nil // We shouldn't receive any further chunks if we used a wrong token.
+				// Should it be an error, though ?
+			}
+		case messages.CRR:
+			crr := response.(messages.CRR)
+			if crr.Header.Number != acr.Header.Number {
+				// This message is not for us. Ignore it
+				continue
+			}
+			chunkNumber := messages.Uint8_6_arr2int(&crr.ChunkNumber)
+			// Let's find its position in the ACR
+			chunkIndexInACR := -1
+			for i, cn := range requested {
+				if cn == chunkNumber {
+					chunkIndexInACR = i
+					break
+				}
+			}
+			if chunkIndexInACR == -1 {
+				// This is not a chunk we requested. Ignore it.
+				continue
+			}
+			received = true
+			mapTimeCRRs[chunkIndexInACR] = t_recv
+
+			err = writeChunkToFile(metadata, chunkNumber, crr.Data, localFile)
+			if err != nil {
+				// TODO: error handling
+				continue
+			}
+		default:
+			// Ignore irrelevant messages
+			continue
+		}
 	}
 	if received {
 		newPacketRate, err := computePacketRate(mapTimeCRRs, n_cr, metadata.packetRate)
@@ -241,6 +296,25 @@ func buildACR(metadata *fileMetadata) (acr *messages.ACR, requested []uint64) {
 	acr = messages.GetACR(metadata.messageCounter, &metadata.token, metadata.fileID, metadata.packetRate, &chunkRequests)
 	metadata.messageCounter++
 	return
+}
+
+func writeChunkToFile(metadata *fileMetadata, chunkNumber uint64, data []byte, file *os.File) error {
+	if !metadata.chunkMap[chunkNumber] {
+		if len(data) != int(metadata.chunkSize) {
+			return fmt.Errorf("Invalid chunk size. Expected %d got %d", metadata.chunkSize, len(data))
+		}
+		offset := int64(chunkNumber) * int64(metadata.chunkSize)
+		_, err := file.WriteAt(data, offset)
+		if err != nil {
+			return fmt.Errorf("write data at offset: %w", err)
+		}
+		// Update chunkMap and first Missing
+		metadata.chunkMap[chunkNumber] = true
+		for metadata.chunkMap[metadata.firstMissing] {
+			metadata.firstMissing++
+		}
+	}
+	return nil
 }
 
 // computePacketRate computes a new packet rate from:

@@ -189,3 +189,47 @@ func TestComputePacketRateLate(t *testing.T) {
 		}
 	*/
 }
+
+func TestWriteChunkToFile(t *testing.T) {
+	var readBuf []byte
+	var metadata fileMetadata
+	metadata.chunkMap = make(map[uint64]bool)
+	metadata.chunkSize = 512
+	metadata.fileSize = 234
+
+	chunkNumber := uint64(5)
+
+	data := make([]byte, metadata.chunkSize)
+	readBuf = make([]byte, metadata.chunkSize)
+
+	copy(data, "Lorem ipsum dolores amet etcaetera etcaetera...")
+
+	// Write data to file
+	tmp, err := os.CreateTemp("", "checksum_test_go")
+	if err != nil {
+		fmt.Printf("Open temp file: %v\n", err)
+		return
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	err = writeChunkToFile(&metadata, chunkNumber, data, tmp)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if !metadata.chunkMap[chunkNumber] {
+		t.Fatalf("chunkMap has not been updated")
+	}
+
+	_, err = tmp.ReadAt(readBuf, int64(chunkNumber)*int64(metadata.chunkSize))
+	if err != nil {
+		t.Fatalf("Error while reading file: %v", err)
+	}
+
+	for i:=0 ; i<int(metadata.chunkSize) ; i++ {
+		if data[i] != readBuf[i] {
+			t.Fatalf("Different byte at position %d between original data %x and written data %x", i, data, readBuf)
+		}
+	}
+}
