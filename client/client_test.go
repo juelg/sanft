@@ -11,7 +11,6 @@ import (
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 )
 
-
 func TestBuildACR(t *testing.T) {
 	metadata := fileMetadata{}
 	metadata.token = [32]uint8{
@@ -23,7 +22,7 @@ func TestBuildACR(t *testing.T) {
 	metadata.maxChunksInACR = 30
 	metadata.chunkMap = make(map[uint64]bool)
 	metadata.chunkMap[10] = true
-	metadata.fileSize = 25;
+	metadata.fileSize = 25
 	metadata.fileID = 0xcafebabe
 
 	acr, requested := buildACR(&metadata)
@@ -39,21 +38,21 @@ func TestBuildACR(t *testing.T) {
 	}
 
 	// Check that the ACR is valid
-	for _,cr := range acr.CRs {
+	for _, cr := range acr.CRs {
 		offset := messages.Uint8_6_arr2int(&cr.ChunkOffset)
 		length := cr.Length
 		if length == 0 {
 			t.Fatalf("Invalid length (0) for chunk request in %v", acr)
 		}
-		for i:=uint64(0); i<uint64(length); i++ {
-			in_acr[offset + i] = true
+		for i := uint64(0); i < uint64(length); i++ {
+			in_acr[offset+i] = true
 			if offset+i > metadata.fileSize {
 				t.Fatalf("Request for an out of bound chunk %d in ACR %v", offset+i, acr)
 			}
 			if metadata.chunkMap[offset+i] {
 				t.Fatalf("Unexpected chunk request for already received chunk %d in ACR %v", offset+i, acr)
 			}
-			n_requests ++
+			n_requests++
 		}
 	}
 	if n_requests > int(metadata.maxChunksInACR) {
@@ -61,7 +60,7 @@ func TestBuildACR(t *testing.T) {
 	}
 
 	// Check that requested matches the id of the chunks requested in the ACR:
-	for _,r := range requested {
+	for _, r := range requested {
 		if !in_acr[r] {
 			t.Fatalf("Chunk %d is in requested but not in ACR", r)
 		}
@@ -121,11 +120,11 @@ func TestComputePacketRate(t *testing.T) {
 	prevRate := uint32(20)
 	t0 := time.Now()
 
-	for i:=0; i<n_expected; i++ {
-		timeMap[i] = t0.Add(time.Duration(i*int(time.Second)/int(prevRate)))
+	for i := 0; i < n_expected; i++ {
+		timeMap[i] = t0.Add(time.Duration(i * int(time.Second) / int(prevRate)))
 	}
 
-	newRate, err := computePacketRate(timeMap, n_expected, prevRate);
+	newRate, err := computePacketRate(timeMap, n_expected, prevRate)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -145,11 +144,11 @@ func TestComputePacketRateMissing(t *testing.T) {
 	prevRate := uint32(2000)
 	t0 := time.Now()
 
-	for _, i := range []int{1,4,23,24,45,46} {
-		timeMap[i] = t0.Add(time.Duration(i*int(time.Second)/int(prevRate)))
+	for _, i := range []int{1, 4, 23, 24, 45, 46} {
+		timeMap[i] = t0.Add(time.Duration(i * int(time.Second) / int(prevRate)))
 	}
 
-	newRate, err := computePacketRate(timeMap, n_expected, prevRate);
+	newRate, err := computePacketRate(timeMap, n_expected, prevRate)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -169,13 +168,13 @@ func TestComputePacketRateLate(t *testing.T) {
 	prevRate := uint32(4)
 	t0 := time.Now()
 
-	for i:=0; i<n_expected; i++ {
-		timeMap[i] = t0.Add(time.Duration(i*int(time.Second)/int(prevRate)))
+	for i := 0; i < n_expected; i++ {
+		timeMap[i] = t0.Add(time.Duration(i * int(time.Second) / int(prevRate)))
 	}
 
-	timeMap[0] = t0.Add(2*time.Second)
+	timeMap[0] = t0.Add(2 * time.Second)
 
-	newRate, err := computePacketRate(timeMap, n_expected, prevRate);
+	newRate, err := computePacketRate(timeMap, n_expected, prevRate)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -185,8 +184,8 @@ func TestComputePacketRateLate(t *testing.T) {
 	}
 
 	/*
-	if newRate > prevRate {
-		t.Fatalf("New packetRate (%d) is larger than previous packetRate (%d)", newRate, prevRate)
-	}
+		if newRate > prevRate {
+			t.Fatalf("New packetRate (%d) is larger than previous packetRate (%d)", newRate, prevRate)
+		}
 	*/
 }

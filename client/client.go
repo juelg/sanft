@@ -1,37 +1,36 @@
 package client
 
 import (
-	"errors"
 	"crypto/sha256"
+	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"time"
-	"math"
 
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 )
 
-
 type fileMetadata struct {
 	// Metadata from the metadata request
 
-	token [32]uint8
-	chunkSize uint16
+	token          [32]uint8
+	chunkSize      uint16
 	maxChunksInACR uint16
-	fileID uint32
-	fileSize uint64
-	checksum [32]byte
+	fileID         uint32
+	fileSize       uint64
+	checksum       [32]byte
 
 	// Information on missing chunks
 
-	chunkMap map[uint64]bool //chunkMap[chunk] == true iff chunk has been received
-	firstMissing uint64 // The index of the first chunk not yet received
+	chunkMap     map[uint64]bool //chunkMap[chunk] == true iff chunk has been received
+	firstMissing uint64          // The index of the first chunk not yet received
 
 	// Information on the connection
 
-	timeout time.Duration
-	packetRate uint32
+	timeout        time.Duration
+	packetRate     uint32
 	messageCounter uint8
 }
 
@@ -42,7 +41,7 @@ type fileMetadata struct {
 // complete SANFT exchange to request the file identified by URI. If the
 // transfer works, the requested file will be written to localFilename.
 func RequestFile(address string, port int, URI string, localFilename string) error {
-    conn, err := messages.CreateClientSocket(address, port)
+	conn, err := messages.CreateClientSocket(address, port)
 	if err != nil {
 		return fmt.Errorf("Create client socket: %w", err)
 	}
@@ -50,7 +49,7 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 
 	// TODO: make retransmissions and timeout configurable.
 	retransmissions := 5
-	timeout := 3*time.Second
+	timeout := 3 * time.Second
 
 	// Request file metadata
 	metadata, err := getMetadata(conn, URI, retransmissions, timeout)
@@ -94,13 +93,13 @@ func getMetadata(conn *net.UDPConn, URL string, retransmissions int, timeout tim
 	metadata := new(fileMetadata)
 	var messageCounter uint8
 	// Send a Metadatarequest with a zero token
-	// It will probably (certainly) be invalid but in that case just take the 
+	// It will probably (certainly) be invalid but in that case just take the
 	mdr := messages.GetMDR(messageCounter, &metadata.token, URL)
 
-	retransmit:
-	for i:=0; i<retransmissions; i++{
+retransmit:
+	for i := 0; i < retransmissions; i++ {
 		mdr.Header.Number = messageCounter
-		messageCounter ++
+		messageCounter++
 		t_send := time.Now()
 		err := mdr.Send(conn)
 		if err != nil {
@@ -114,7 +113,7 @@ func getMetadata(conn *net.UDPConn, URL string, retransmissions int, timeout tim
 			return nil, fmt.Errorf("Set deadline: %w", err)
 		}
 
-		receive:
+	receive:
 		for time.Now().Before(deadline) {
 			_, _, err := conn.ReadFromUDP(buf)
 			if err != nil {
@@ -122,7 +121,7 @@ func getMetadata(conn *net.UDPConn, URL string, retransmissions int, timeout tim
 					// If it's a timeout retransmit
 					continue retransmit
 				} else {
-					// Otherwise ? IDK 
+					// Otherwise ? IDK
 					// TODO: Add error handling for other errors
 					return nil, fmt.Errorf("Read from UDP: %w", err)
 				}
@@ -130,14 +129,14 @@ func getMetadata(conn *net.UDPConn, URL string, retransmissions int, timeout tim
 			response, err := messages.ParseServer(&buf)
 			if err != nil {
 				// This either means that:
-				//	- the message has an invalid version; 
+				//	- the message has an invalid version;
 				//	- the message type is not recognised;
 				//	- the message has not the right format for its type;
 				//		- Either because its plain invalid;
 				//	    - Or because there is an error from the server;
 				// - or binary.Read fails for some other reason
 				// TODO: Investigate on which it is and act accordingly
-				fmt.Printf("Error while parsing response: %v\nResponse:%x\n", err, buf);
+				fmt.Printf("Error while parsing response: %v\nResponse:%x\n", err, buf)
 				continue receive
 			}
 			switch response.(type) {
@@ -221,11 +220,11 @@ func buildACR(metadata *fileMetadata) (acr *messages.ACR, requested []uint64) {
 	for chunksInACR < int(metadata.maxChunksInACR) && offset < metadata.fileSize {
 		requested = append(requested, offset)
 		length := 1
-		// Find longest length of missing chunks starting from offset 
+		// Find longest length of missing chunks starting from offset
 		for uint64(length)+offset < metadata.fileSize &&
-		length < int(metadata.maxChunksInACR)-chunksInACR &&
-		length < 255 &&
-		!metadata.chunkMap[uint64(length)+offset] {
+			length < int(metadata.maxChunksInACR)-chunksInACR &&
+			length < 255 &&
+			!metadata.chunkMap[uint64(length)+offset] {
 			requested = append(requested, uint64(length)+offset)
 			length++
 		}
@@ -235,12 +234,12 @@ func buildACR(metadata *fileMetadata) (acr *messages.ACR, requested []uint64) {
 		// Find the next offset of a missing chunk
 		offset += uint64(length)
 		for metadata.chunkMap[offset] {
-			offset ++
+			offset++
 		}
 	}
 	// Create the ACR
 	acr = messages.GetACR(metadata.messageCounter, &metadata.token, metadata.fileID, metadata.packetRate, &chunkRequests)
-	metadata.messageCounter ++
+	metadata.messageCounter++
 	return
 }
 
