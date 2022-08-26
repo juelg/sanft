@@ -26,12 +26,13 @@ const (
 
 // error codes
 const (
-	NoError           uint8 = 0
-	UnsupporedVersion uint8 = 1
-	InvalidFileID	  uint8 = 2
-	TooManyClients	  uint8 = 3
-	ChunkOutOfBounds  uint8	= 4
-	ZeroLengthCR	  uint8 = 5
+	NoError            uint8 = 0
+	UnsupportedVersion uint8 = 1
+	InvalidFileID      uint8 = 2
+	FileNotFound       uint8 = 2
+	TooManyChunks      uint8 = 3
+	ChunkOutOfBounds   uint8 = 4
+	ZeroLengthCR       uint8 = 5
 )
 
 func Int2uint8_6_arr(a uint64) *[6]uint8 {
