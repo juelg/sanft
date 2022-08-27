@@ -75,6 +75,36 @@ func TestMDR(t *testing.T){
     defer conn_server.Close()
 }
 
+func TestServerError(t *testing.T){
+    conn_server, conn_client, addr := createTestServerAndClient(t)
+    defer conn_client.Close()
+    defer conn_server.Close()
+
+    // send some error
+    msg := ServerHeader{Version: VERS, Type: MDRR_t, Number: 0, Error: FileNotFound}
+
+    err := msg.Send(conn_server, addr)
+    if err != nil{
+        t.Fatalf(`Error while sending message to client: %v`, err)
+    }
+    data, err := ClientReceive(conn_client, 10000)
+    if err != nil{
+        t.Fatalf(`Error while receiving on client: %v`, err)
+    }
+    // parse message
+    msgr, err := ParseServer(&data)
+    if err != nil{
+        t.Fatalf(`Error while parsing server message: %v`, err)
+    }
+    // type assertion
+    var header ServerHeader = msgr.(ServerHeader)
+    // sanity check received data
+    assert.Equal(t, header.Number, msg.Number, "Header number missmatch")
+    assert.Equal(t, header.Error, msg.Error, "Header error missmatch")
+    assert.Equal(t, header.Type, msg.Type, "Header type missmatch")
+    assert.Equal(t, header.Version, msg.Version, "Header version missmatch")
+}
+
 func TestNTM(t *testing.T){
     conn_server, conn_client, addr := createTestServerAndClient(t)
     defer conn_client.Close()
