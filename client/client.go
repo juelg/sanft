@@ -75,7 +75,7 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 	}
 	metadata.localFile = localFile
 	// Request chunks
-	for metadata.firstMissing <= metadata.fileSize {
+	for metadata.firstMissing < metadata.fileSize {
 		err := getMissingChunks(conn, metadata)
 		if err != nil {
 			localFile.Close()
@@ -99,7 +99,7 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 // updateMetadata sends a MetaData Request to the server and parses the response
 // to update metadata.
 func updateMetadata(conn *net.UDPConn, metadata *fileMetadata) error {
-	var buf []byte
+	buf := make([]byte, 0x10000) // 64kB
 	if metadata.timeout == 0 {
 		return errors.New("metadata.timeout cannot be 0.")
 	}
@@ -124,7 +124,7 @@ retransmit:
 
 	receive:
 		for time.Now().Before(deadline) {
-			_, _, err := conn.ReadFromUDP(buf)
+			n, _, err := conn.ReadFromUDP(buf)
 			if err != nil {
 				if errors.Is(err, os.ErrDeadlineExceeded) {
 					// If it's a timeout, retransmit
@@ -134,7 +134,8 @@ retransmit:
 					return fmt.Errorf("Read from UDP: %w", err)
 				}
 			}
-			response, err := messages.ParseServer(&buf)
+			raw := buf[:n]
+			response, err := messages.ParseServer(&raw)
 			if err != nil {
 				if errors.Is(err, new(messages.UnsupporedVersionError)) {
 					// We can't do anything if we don't speak the same language
@@ -142,10 +143,10 @@ retransmit:
 				} else if errors.Is(err, new(messages.UnsupporedTypeError)) ||
 				errors.Is(err, new(messages.WrongPacketLengthError)) {
 					// Ignore unknown messages, but still log the error
-					log.Printf("WARN: Invalid response received: %v. Dropped response:%x\n", err, buf)
+					log.Printf("WARN: Invalid response received: %v. Dropped response:%x\n", err, raw)
 					continue receive
 				}
-				log.Printf("WARN: Unknown error while parsing response: %v. Dropped response:%x\n", err, buf)
+				log.Printf("WARN: Unknown error while parsing response: %v. Dropped response:%x\n", err, raw)
 				continue receive
 			}
 			switch response.(type) {
@@ -230,10 +231,13 @@ func getMetadataFromMDRR(metadata *fileMetadata, mdrr *messages.MDRR) {
 // This function also receives the CRRs, write them to localFile, update the
 // chunkMap and perform packet rate measurements.
 func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
-	var buf []byte
+	buf := make([]byte, 0x10000) // 64kB
 	// Build an ACR and send it
 	acr, requested := buildACR(metadata)
 	n_cr := len(requested)
+	if n_cr == 0 {
+		return fmt.Errorf("No missing chunks.%v", metadata)
+	}
 	t_send := time.Now()
 	err := acr.Send(conn)
 	if err != nil {
@@ -247,7 +251,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 		if err != nil {
 			return fmt.Errorf("Set deadline: %w", err)
 		}
-		_, _, err := conn.ReadFromUDP(buf)
+		n, _, err := conn.ReadFromUDP(buf)
 		t_recv := time.Now()
 		if err != nil {
 			if os.IsTimeout(err) {
@@ -258,7 +262,8 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 				return fmt.Errorf("Read from UDP: %w", err)
 			}
 		}
-		response, err := messages.ParseServer(&buf)
+		raw := buf[:n]
+		response, err := messages.ParseServer(&raw)
 		if err != nil {
 			if errors.Is(err, new(messages.UnsupporedVersionError)) {
 				// We can't do anything if we don't speak the same language
@@ -266,10 +271,10 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 			} else if errors.Is(err, new(messages.UnsupporedTypeError)) ||
 			errors.Is(err, new(messages.WrongPacketLengthError)) {
 				// Ignore unknown messages, but still log the error
-				log.Printf("WARN: Invalid response received: %v. Dropped response:%x\n", err, buf)
+				log.Printf("WARN: Invalid response received: %v. Dropped response:%x\n", err, raw)
 				continue
 			}
-			log.Printf("WARN: Unknown error while parsing response: %v. Dropped response:%x\n", err, buf)
+			log.Printf("WARN: Unknown error while parsing response: %v. Dropped response:%x\n", err, raw)
 			continue
 		}
 		switch response.(type) {
@@ -361,7 +366,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 			}
 			received = true
 			mapTimeCRRs[chunkIndexInACR] = t_recv
-			deadline = t_recv.Add(time.Duration(uint64(nCRRsToWait)*uint64(time.Second)/uint64(metadata.packetRate)))
+			deadline = t_recv.Add(time.Duration(nCRRsToWait)*time.Second/time.Duration(metadata.packetRate))
 
 			err = writeChunkToFile(metadata, chunkNumber, crr.Data, metadata.localFile)
 			if err != nil {
@@ -380,6 +385,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 			if err != nil {
 				return fmt.Errorf("compute new packetRate: %w", err)
 			}
+			log.Printf("INFO: Updated packetRate: before:%d, now:%d", metadata.packetRate, newPacketRate)
 			metadata.packetRate = newPacketRate
 		}
 	} else {
@@ -423,7 +429,7 @@ func buildACR(metadata *fileMetadata) (acr *messages.ACR, requested []uint64) {
 
 func writeChunkToFile(metadata *fileMetadata, chunkNumber uint64, data []byte, file *os.File) error {
 	if !metadata.chunkMap[chunkNumber] {
-		if len(data) != int(metadata.chunkSize) {
+		if chunkNumber != metadata.fileSize - 1 && len(data) != int(metadata.chunkSize) {
 			return fmt.Errorf("Invalid chunk size. Expected %d got %d", metadata.chunkSize, len(data))
 		}
 		offset := int64(chunkNumber) * int64(metadata.chunkSize)

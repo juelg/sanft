@@ -1,15 +1,147 @@
 package client
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
+	"errors"
 	"fmt"
+	"net"
 	"os"
+	"regexp"
 	"testing"
 	"time"
 
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 )
+
+func startMockServer(quit chan bool, conn *net.UDPConn, filename string, chunkSize uint16, maxChunksInACR uint16, fileID uint32, fileData []byte) {
+	packetRateAddC := 10
+	fileSize := uint64((len(fileData) + int(chunkSize-1))/int(chunkSize))
+	var checksum [32]byte
+	var token [32]uint8
+	h := sha256.New()
+	_, err := h.Write(fileData)
+	if err != nil {
+		fmt.Printf("Mock Server: Error with compute checksum: %v\n", err)
+		return
+	}
+	copy(checksum[:], h.Sum(nil))
+	for {
+		select {
+		case <- quit:
+			return
+		default:
+			conn.SetReadDeadline(time.Now().Add(500*time.Millisecond))
+			addr, data, err := messages.ServerReceive(conn)
+			if err != nil{
+				if os.IsTimeout(errors.Unwrap(err)) {
+					continue
+				}
+				fmt.Printf("timeout: %v\n", err)
+				continue
+			}
+			addrData := new(bytes.Buffer)
+			binary.Write(addrData, binary.BigEndian, addr)
+			h := sha256.New()
+			_, err = h.Write(addrData.Bytes())
+			if err != nil {
+				fmt.Printf("Mock Server: Error with compute token: %v\n", err)
+				return
+			}
+			copy(token[:], h.Sum(nil))
+			msg, err := messages.ParseClient(&data)
+			if err != nil{
+				fmt.Printf("Mock Server: while parsing client message: %v\n", err)
+				continue
+			}
+			switch msg.(type){
+			case messages.MDR:
+				mdr := msg.(messages.MDR)
+				if mdr.Header.Token != token {
+					response := messages.GetNTM(mdr.Header.Number, 0, &token)
+					err = response.Send(conn, addr)
+					if err != nil {
+						fmt.Printf("Mock Server: Error while sending NTM: %v\n", err)
+					}
+					break
+				}
+				if mdr.URI != filename {
+					response := messages.ServerHeader{Version: messages.VERS, Type: messages.MDRR_t, Number: mdr.Header.Number, Error: messages.FileNotFound}
+					err = response.Send(conn, addr)
+					if err != nil {
+						fmt.Printf("Mock Server: Error while sending header: %v\n", err)
+					}
+					break
+				}
+				response := messages.GetMDRR(mdr.Header.Number, 0, uint16(chunkSize), uint16(maxChunksInACR), fileID, *messages.Int2uint8_6_arr(fileSize), &checksum)
+				err = response.Send(conn, addr)
+				if err != nil {
+					fmt.Printf("Mock Server: Error while sending MDRR: %v\n", err)
+				}
+			case messages.ACR:
+				acr := msg.(messages.ACR)
+				if acr.Header.Token != token {
+					response := messages.GetNTM(acr.Header.Number, 0, &token)
+					err = response.Send(conn, addr)
+					if err != nil {
+						fmt.Printf("Mock Server: Error while sending NTM: %v\n", err)
+					}
+					break
+				}
+				if acr.FileID != fileID {
+					response := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t, Number: acr.Header.Number, Error: messages.InvalidFileID}
+					err = response.Send(conn, addr)
+					if err != nil {
+						fmt.Printf("Mock Server: Error while sending header: %v\n", err)
+					}
+					break
+				}
+				n_cr := 0
+				packetRate := acr.PacketRate + uint32(packetRateAddC)
+				tNext := time.Now()
+				for _,cr := range acr.CRs {
+					offset := messages.Uint8_6_arr2int(&cr.ChunkOffset)
+					for i:=offset; i < offset+uint64(cr.Length); i++ {
+						n_cr ++
+						if n_cr > int(maxChunksInACR) {
+							response := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t, Number: acr.Header.Number, Error: messages.TooManyChunks}
+							err = response.Send(conn, addr)
+							if err != nil {
+								fmt.Printf("Mock Server: Error while sending header: %v\n", err)
+							}
+							break
+						}
+						if i > fileSize {
+							response := messages.GetCRR(acr.Header.Number, messages.ChunkOutOfBounds, *messages.Int2uint8_6_arr(i), &[]uint8{})
+							err = response.Send(conn, addr)
+							if err != nil {
+								fmt.Printf("Mock Server: Error while sending CRR with error: %v\n", err)
+							}
+							break
+						}
+						time.Sleep(tNext.Sub(time.Now()))
+						var chunk []byte
+						if i < fileSize-1 {
+							chunk = fileData[i*uint64(chunkSize):(i+1)*uint64(chunkSize)]
+						} else {
+							chunk = fileData[i*uint64(chunkSize):]
+						}
+						response := messages.GetCRR(acr.Header.Number, messages.NoError, *messages.Int2uint8_6_arr(i), &chunk)
+						err = response.Send(conn, addr)
+						if err != nil {
+							fmt.Printf("Mock Server: Error while sending CRR: %v\n", err)
+						}
+						tNext = time.Now().Add(time.Second/time.Duration(packetRate))
+						break
+					}
+				}
+			}
+
+		}
+	}
+}
 
 func TestBuildACR(t *testing.T) {
 	metadata := fileMetadata{}
@@ -134,7 +266,7 @@ func TestComputePacketRate(t *testing.T) {
 	}
 
 	if newRate != prevRate {
-		t.Fatalf("New packetRate (%d) differ from previous packetRate (%d)", newRate, prevRate)
+		t.Fatalf("New packetRate (%d) differs from previous packetRate (%d)", newRate, prevRate)
 	}
 }
 
@@ -230,6 +362,160 @@ func TestWriteChunkToFile(t *testing.T) {
 	for i:=0 ; i<int(metadata.chunkSize) ; i++ {
 		if data[i] != readBuf[i] {
 			t.Fatalf("Different byte at position %d between original data %x and written data %x", i, data, readBuf)
+		}
+	}
+}
+
+func TestUpdateMetadata(t *testing.T) {
+	IP := "127.0.0.200"
+	port := 6666
+	URI := "foo"
+	chunkSize := uint16(8)
+	maxChunksInACR := uint16(10)
+	fileID := uint32(0x1337c001)
+	data := []byte("Not important")
+	quit := make(chan bool)
+
+    conn_server, err := messages.CreateServerSocket(IP, port)
+    if err != nil{
+        t.Fatalf(`Creating server failed: %v`, err)
+    }
+	defer conn_server.Close()
+
+	go startMockServer(quit, conn_server, URI, chunkSize, maxChunksInACR, fileID, data)
+	defer func() {fmt.Println("Closing server...");quit <- true}()
+
+    conn_client, err := messages.CreateClientSocket(IP, port)
+    if err != nil{
+        t.Fatalf(`Creating client failed: %v`, err)
+    }
+	defer conn_client.Close()
+
+	metadata := new(fileMetadata)
+	metadata.timeout = 3*time.Second
+	metadata.url = URI
+
+	err = updateMetadata(conn_client, metadata)
+	if err != nil {
+		t.Fatalf("updateMetadata failed: %v", err)
+	}
+
+	if metadata.fileID != fileID {
+		t.Fatalf("Invalid fileID. Expected %x got %x", fileID, metadata.fileID)
+	}
+	if metadata.chunkSize != chunkSize {
+		t.Fatalf("Invalid chunkSize. Expected %d got %d", chunkSize, metadata.chunkSize)
+	}
+	if metadata.maxChunksInACR != maxChunksInACR {
+		t.Fatalf("Invalid maxChunksInACR. Expected %d got %d", maxChunksInACR, metadata.maxChunksInACR)
+	}
+
+	metadata.chunkMap[2] = true
+	// Simulate a file ID change and a new metadata request
+	metadata.fileID = 0xf00dbad1
+	err = updateMetadata(conn_client, metadata)
+	if err != nil {
+		t.Fatalf("updateMetadata failed: %v", err)
+	}
+	if metadata.fileID != fileID {
+		t.Fatalf("Invalid fileID. Expected %x got %x", fileID, metadata.fileID)
+	}
+	if metadata.chunkSize != chunkSize {
+		t.Fatalf("Invalid chunkSize. Expected %d got %d", chunkSize, metadata.chunkSize)
+	}
+	if metadata.maxChunksInACR != maxChunksInACR {
+		t.Fatalf("Invalid maxChunksInACR. Expected %d got %d", maxChunksInACR, metadata.maxChunksInACR)
+	}
+	if metadata.chunkMap[2] {
+		t.Fatal("chunkMap was not reset after fileID change.")
+	}
+}
+
+func TestUpdateMetadataNotFound(t *testing.T) {
+	IP := "127.0.0.200"
+	port := 6666
+	URI := "foo"
+	wrongURI := "notfoo"
+	chunkSize := uint16(8)
+	maxChunksInACR := uint16(10)
+	fileID := uint32(0x1337c001)
+	data := []byte("Not important")
+	want := regexp.MustCompile(`not found`)
+	quit := make(chan bool)
+
+    conn_server, err := messages.CreateServerSocket(IP, port)
+    if err != nil{
+        t.Fatalf(`Creating server failed: %v`, err)
+    }
+	defer conn_server.Close()
+
+	go startMockServer(quit, conn_server, URI, chunkSize, maxChunksInACR, fileID, data)
+	defer func() {quit <- true}()
+
+    conn_client, err := messages.CreateClientSocket(IP, port)
+    if err != nil{
+        t.Fatalf(`Creating client failed: %v`, err)
+    }
+	defer conn_client.Close()
+
+	metadata := new(fileMetadata)
+	metadata.timeout = 3*time.Second
+	metadata.url = wrongURI
+
+	err = updateMetadata(conn_client, metadata)
+	if err == nil {
+		t.Fatalf("updateMetadata should have failed. It didn't")
+	}
+	if !want.MatchString(err.Error()) {
+		t.Fatalf("Expected %s in error, got %v", want, err)
+	}
+}
+
+func TestRequestFile(t *testing.T) {
+	IP := "127.0.0.200"
+	port := 6666
+	URI := "foo"
+	filename := "/tmp/sanftTestRequest.dat"
+	chunkSize := uint16(64)
+	maxChunksInACR := uint16(4)
+	fileID := uint32(0x1337c001)
+	dataSize := 456
+	data := make([]byte, dataSize)
+	_, err := rand.Read(data)
+	if err != nil {
+		t.Errorf("Could not read random data")
+	}
+	fmt.Printf("Random data: %x\n", data)
+	quit := make(chan bool)
+
+    conn_server, err := messages.CreateServerSocket(IP, port)
+    if err != nil{
+        t.Fatalf(`Creating server failed: %v`, err)
+    }
+	defer conn_server.Close()
+
+	go startMockServer(quit, conn_server, URI, chunkSize, maxChunksInACR, fileID, data)
+	defer func() {quit <- true}()
+
+	err = RequestFile(IP, port, URI, filename)
+	if err != nil {
+		t.Fatalf("RequestFile failed : %v", err)
+	}
+
+	// Check that the file exists and that the data is correct
+	fileData, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("Could not open created file: %v", err)
+	}
+	defer os.Remove(filename)
+
+	if len(fileData) != len(data) {
+		t.Fatalf("The received file doesn't have the right length. Expected %d got %d", len(data), len(fileData))
+	}
+
+	for i,b := range fileData {
+		if b != data[i] {
+			t.Fatalf("The received data and sent data differ at position %d. Sent: %x; Received: %x", i, data, fileData)
 		}
 	}
 }
