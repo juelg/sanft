@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
 	"net"
@@ -12,6 +13,31 @@ import (
 
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 )
+
+type ClientConfig struct {
+	// Implementation specific values for SANFT
+	RetransmissionsMDR int    // Max number of retransmissions when sending an MDR
+	InitialPacketRate  uint32 // Initial packet rate in pkt/s
+	NCRRsToWait        int    // Number of virtual CRR to wait for the next CRR to arrive
+
+	// Markov simulation of packet loss
+	P float64 // Probability of losing packet n+1 if n was not lost
+	Q float64 // Probability of losing packet n+1 if n was lost
+
+	// Debugging
+	DebugLogger *log.Logger
+	InfoLogger  *log.Logger
+	WarnLogger  *log.Logger
+}
+
+var DefaultConfig = ClientConfig {
+	RetransmissionsMDR: 5,
+	InitialPacketRate:  10,
+	NCRRsToWait:        3,
+	DebugLogger:        log.New(ioutil.Discard, "DEBUG: ", log.LstdFlags),
+	InfoLogger:         log.New(os.Stderr, "INFO: ", log.LstdFlags),
+	WarnLogger:         log.New(os.Stderr, "WARN: ", log.LstdFlags),
+}
 
 type fileMetadata struct {
 	// Metadata from the metadata request
@@ -41,19 +67,17 @@ type fileMetadata struct {
 	localFile      *os.File
 }
 
-// TODO[or not]: make this configurable
+// These are fixed by the specification
 const (
 	initialTimeout    time.Duration = 3*time.Second
-	retransmissionsMDR int = 5 // Max number of retransmissions when sending an MDR
-	rtt2timeoutFactor  int = 2 // timeout = rtt2timeoutFactor * rtt
-	initialPacketRate  uint32 = 10
-	nCRRsToWait        int = 3 // Number of virtual CRR to wait for the next CRR to arrive
+	rtt2timeoutFactor int = 2 // timeout = rtt2timeoutFactor * rtt
+	maxChunkSize      uint16 = 65517
 )
 
 // RequestFile connects to the server at address:port and tries to perform a
 // complete SANFT exchange to request the file identified by URI. If the
 // transfer works, the requested file will be written to localFilename.
-func RequestFile(address string, port int, URI string, localFilename string) error {
+func RequestFile(address string, port int, URI string, localFilename string, conf *ClientConfig) error {
 	conn, err := messages.CreateClientSocket(address, port)
 	if err != nil {
 		return fmt.Errorf("create client socket: %w", err)
@@ -64,8 +88,8 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 	metadata := new(fileMetadata)
 	metadata.url = URI
 	metadata.timeout = initialTimeout
-	metadata.packetRate = initialPacketRate
-	err = updateMetadata(conn, metadata)
+	metadata.packetRate = conf.InitialPacketRate
+	err = updateMetadata(conn, metadata, conf)
 	if err != nil {
 		return fmt.Errorf("get metadata: %w", err)
 	}
@@ -77,7 +101,7 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 	metadata.localFile = localFile
 	// Request chunks
 	for metadata.firstMissing < metadata.fileSize {
-		err := getMissingChunks(conn, metadata)
+		err := getMissingChunks(conn, metadata, conf)
 		if err != nil {
 			localFile.Close()
 			return fmt.Errorf("get missing chunks: %w", err)
@@ -99,15 +123,28 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 	return nil
 }
 
+func checkConfig(conf *ClientConfig) error {
+	if conf.InitialPacketRate == 0 {
+		return errors.New("initialPacketRate cannot be 0")
+	}
+	if conf.RetransmissionsMDR < 2 {
+		return errors.New("retransmissionsMDR must be at least 2")
+	}
+	if conf.NCRRsToWait < 3 {
+		conf.WarnLogger.Printf("nCRRsToWait is set to %d. The specification recommands to wait for at least 3 CRRs\n", conf.NCRRsToWait)
+	}
+	return nil
+}
+
 // updateMetadata sends a MetaData Request to the server and parses the response
 // to update metadata.
-func updateMetadata(conn *net.UDPConn, metadata *fileMetadata) error {
+func updateMetadata(conn *net.UDPConn, metadata *fileMetadata, conf *ClientConfig) error {
 	buf := make([]byte, 0x10000) // 64kB
 	if metadata.timeout == 0 {
 		return errors.New("metadata.timeout cannot be 0.")
 	}
 retransmit:
-	for i := 0; i < retransmissionsMDR; i++ {
+	for i := 0; i < conf.RetransmissionsMDR; i++ {
 		mdr := messages.GetMDR(metadata.messageCounter, &metadata.token, metadata.url)
 		metadata.messageCounter++
 		t_send := time.Now()
@@ -146,10 +183,10 @@ retransmit:
 				} else if errors.Is(err, new(messages.UnsupporedTypeError)) ||
 				errors.Is(err, new(messages.WrongPacketLengthError)) {
 					// Ignore unknown messages, but still log the error
-					log.Printf("WARN: Invalid response received: %v. Dropped response:%x\n", err, raw)
+					conf.WarnLogger.Printf("Invalid response received: %v. Dropped response:%x\n", err, raw)
 					continue receive
 				}
-				log.Printf("WARN: Unknown error while parsing response: %v. Dropped response:%x\n", err, raw)
+				conf.WarnLogger.Printf("Unknown error while parsing response: %v. Dropped response:%x\n", err, raw)
 				continue receive
 			}
 			switch response.(type) {
@@ -157,12 +194,12 @@ retransmit:
 				header := response.(messages.ServerHeader)
 				if header.Type != messages.MDRR_t {
 					// Ignore it
-					log.Printf("WARN: Unexpected server header of type %d. Dropped response: %v\n", header.Type, header)
+					conf.WarnLogger.Printf("Unexpected server header of type %d. Dropped response: %v\n", header.Type, header)
 					continue receive
 				}
 				if header.Number != mdr.Header.Number {
 					// Not for us. Ignore it
-					//log.Printf("DEBUG: Received response with wrong message number(%d instead of %d). Dropped\n", header.Number, mdr.Header.Number)
+					conf.DebugLogger.Printf("Received response with wrong message number(%d instead of %d). Dropped\n", header.Number, mdr.Header.Number)
 					continue receive
 				}
 
@@ -184,13 +221,13 @@ retransmit:
 				ntm := response.(messages.NTM)
 				metadata.token = ntm.Token
 				// Note: even if this is expected in the protocol, this still counts as one retransmission
-				// log.Printf("DEBUG: Updated token to %x (from %x). Retransmitting...\n", ntm.Token, mdr.Header.Token)
+				conf.DebugLogger.Printf("Updated token to %x (from %x). Retransmitting...\n", ntm.Token, mdr.Header.Token)
 				continue retransmit
 			case messages.MDRR:
 				mdrr := response.(messages.MDRR)
 				if mdrr.Header.Number != mdr.Header.Number {
 					// This message is not for us. Ignore it
-					// log.Printf("DEBUG: Received response with wrong message number(%d instead of %d). Dropped\n", mdrr.Header.Number, mdr.Header.Number)
+					conf.DebugLogger.Printf("Received response with wrong message number(%d instead of %d). Dropped\n", mdrr.Header.Number, mdr.Header.Number)
 					continue receive
 				}
 				// Update metadata
@@ -215,13 +252,13 @@ retransmit:
 				}
 				return nil
 			default:
-				// log.Printf("DEBUG: Received unexpected response of type %T. Dropped\n", response)
+				conf.DebugLogger.Printf("Received unexpected response of type %T. Dropped\n", response)
 				continue receive
 			}
 		}
 
 	}
-	return fmt.Errorf("Could not get metadata from server after %d retransmissions", retransmissionsMDR)
+	return fmt.Errorf("Could not get metadata from server after %d retransmissions", conf.RetransmissionsMDR)
 }
 
 // getMetadataFromMDRR overwrites relevant field in metadata with fields from
@@ -240,8 +277,8 @@ func getMetadataFromMDRR(metadata *fileMetadata, mdrr *messages.MDRR) error{
 	if metadata.chunkSize == 0 {
 		return errors.New("chunkSize cannot be 0")
 	}
-	if metadata.chunkSize > 65517 {
-		return fmt.Errorf("chunkSize is too large: %d, max is 65517", metadata.chunkSize)
+	if metadata.chunkSize > maxChunkSize {
+		return fmt.Errorf("chunkSize is too large: %d, max is %d", metadata.chunkSize, maxChunkSize)
 	}
 
 	return nil
@@ -250,11 +287,11 @@ func getMetadataFromMDRR(metadata *fileMetadata, mdrr *messages.MDRR) error{
 // Sends one ACR to get missing chunks.
 // This function also receives the CRRs, write them to localFile, update the
 // chunkMap and perform packet rate measurements.
-func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
+func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, conf *ClientConfig) error {
 	buf := make([]byte, 0x10000) // 64kB
 	// Build an ACR and send it
 	acr, requested := buildACR(metadata)
-	//log.Printf("DEBUG: Requesting chunks %v\n", requested)
+	conf.DebugLogger.Printf("Requesting chunks %v\n", requested)
 	n_cr := len(requested)
 	if n_cr == 0 {
 		return fmt.Errorf("no missing chunks.%v", metadata)
@@ -292,10 +329,10 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 			} else if errors.Is(err, new(messages.UnsupporedTypeError)) ||
 			errors.Is(err, new(messages.WrongPacketLengthError)) {
 				// Ignore unknown messages, but still log the error
-				log.Printf("WARN: Invalid response received: %v. Dropped response:%x\n", err, raw)
+				conf.WarnLogger.Printf("Invalid response received: %v. Dropped response:%x\n", err, raw)
 				continue
 			}
-			log.Printf("WARN: Unknown error while parsing response: %v. Dropped response:%x\n", err, raw)
+			conf.WarnLogger.Printf("Unknown error while parsing response: %v. Dropped response:%x\n", err, raw)
 			continue
 		}
 		switch response.(type) {
@@ -303,7 +340,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 			header := response.(messages.ServerHeader)
 			if header.Number != acr.Header.Number {
 				// Ignore it
-				// log.Printf("DEBUG: Received response with wrong message number(%d instead of %d). Dropped\n", header.Number, acr.Header.Number)
+				conf.DebugLogger.Printf("Received response with wrong message number(%d instead of %d). Dropped\n", header.Number, acr.Header.Number)
 				continue
 			}
 			switch header.Error {
@@ -312,8 +349,8 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 			case messages.InvalidFileID:
 				// Request new metadata and update it
 				oldFileID := metadata.fileID
-				err := updateMetadata(conn, metadata)
-				log.Printf("INFO: Updated metadata. Old fileID:%x, new fileID:%x\n", oldFileID, metadata.fileID)
+				err := updateMetadata(conn, metadata, conf)
+				conf.InfoLogger.Printf("Updated metadata. Old fileID:%x, new fileID:%x\n", oldFileID, metadata.fileID)
 				if err != nil {
 					return fmt.Errorf("get metadata after invalid fileID: %w", err)
 				}
@@ -323,8 +360,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 					// Our mistake... Let's throw an error to investigate
 					return fmt.Errorf("malformed ACR: we requested %d chunks in an ACR. Max is %d. (%v)", n_cr, metadata.maxChunksInACR, acr)
 				} else {
-					log.Printf("WARN: Received TooManyChunks error for ACR %v. MaxChunksInACR=%d; # of chunks in ACR:%d. Ignored...\n", acr, metadata.maxChunksInACR, n_cr)
-					// TODO: Send a MDR to update metadata
+					conf.WarnLogger.Printf("Received TooManyChunks error for ACR %v. MaxChunksInACR=%d; # of chunks in ACR:%d. Ignored...\n", acr, metadata.maxChunksInACR, n_cr)
 					continue
 				}
 			case messages.ZeroLengthCR:
@@ -335,7 +371,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 						return fmt.Errorf("malformed ACR: we sent a CR with length 0. (%v)", acr)
 					}
 				}
-				log.Printf("WARN: Received ZeroLengthCR error for ACR %v. Ignored.\n", acr)
+				conf.WarnLogger.Printf("Received ZeroLengthCR error for ACR %v. Ignored.\n", acr)
 				continue
 			default:
 				return fmt.Errorf("CRR server error: Unknown error code for CRR %d", header.Error)
@@ -344,7 +380,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 			ntm := response.(messages.NTM)
 			if ntm.Token != metadata.token {
 				metadata.token = ntm.Token
-				// log.Printf("DEBUG: Updated token to %x (from %x). Retransmitting...\n", ntm.Token, acr.Header.Token)
+				conf.DebugLogger.Printf("Updated token to %x (from %x). Retransmitting...\n", ntm.Token, acr.Header.Token)
 				return nil // We shouldn't receive any further chunks if we used a wrong token.
 				// Should it be an error, though ? No, we just want to resume normally
 			}
@@ -352,7 +388,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 			crr := response.(messages.CRR)
 			if crr.Header.Number != acr.Header.Number {
 				// This message is not for us. Ignore it
-				// log.Printf("INFO: Received response with wrong message number(%d instead of %d). Dropped\n", crr.Header.Number, acr.Header.Number)
+				conf.DebugLogger.Printf("Received response with wrong message number(%d instead of %d). Dropped\n", crr.Header.Number, acr.Header.Number)
 				continue
 			}
 			chunkNumber := messages.Uint8_6_arr2int(&crr.ChunkNumber)
@@ -366,7 +402,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 			}
 			if chunkIndexInACR == -1 {
 				// This is not a chunk we requested. Ignore it.
-				log.Printf("WARN: Received CRR for unrequested chunk %d. (The requested chunks are %v). Dropped.\n", chunkNumber, requested)
+				conf.InfoLogger.Printf("Received CRR for unrequested chunk %d. (The requested chunks are %v). Dropped.\n", chunkNumber, requested)
 				continue
 			}
 			// We need to check that there is no error
@@ -380,23 +416,22 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 					// That's our fault. Let's throw an error to investigate
 					return fmt.Errorf("malformed ACR: we requested chunk #%d for a file of size %d (%v)", chunkNumber, metadata.fileSize, acr)
 				} else {
-					log.Printf("WARN: Received ChunkOutOfBounds error for chunk #%d in file of size %d. (%v)\n", chunkNumber, metadata.fileSize, acr)
-					// TODO: Send new MDR to update metadata just in case
+					conf.WarnLogger.Printf("Received ChunkOutOfBounds error for chunk #%d in file of size %d. (%v)\n", chunkNumber, metadata.fileSize, acr)
 					continue
 				}
 			}
 			received = true
 			mapTimeCRRs[chunkIndexInACR] = t_recv
-			deadline = t_recv.Add(time.Duration(nCRRsToWait+n_cr-chunkIndexInACR)*time.Second/time.Duration(metadata.packetRate))
+			deadline = t_recv.Add(time.Duration(conf.NCRRsToWait+n_cr-chunkIndexInACR)*time.Second/time.Duration(metadata.packetRate))
 
 			err = writeChunkToFile(metadata, chunkNumber, crr.Data, metadata.localFile)
 			if err != nil {
-				log.Printf("WARN: Could not write chunk #%d to file %s : %v", chunkNumber, metadata.localFile.Name(), err)
+				conf.WarnLogger.Printf("Could not write chunk #%d to file %s : %v", chunkNumber, metadata.localFile.Name(), err)
 				continue
 			}
 		default:
 			// Ignore irrelevant messages
-			log.Printf("WARN: Received unexpected response type to ACR: %T. Dropped...\n", response)
+			conf.WarnLogger.Printf("Received unexpected response type to ACR: %T. Dropped...\n", response)
 			continue
 		}
 	}

@@ -4,7 +4,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
+	"io/ioutil"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"regexp"
@@ -13,6 +15,16 @@ import (
 
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 )
+
+var testConfig = ClientConfig{
+	RetransmissionsMDR: 3,
+	InitialPacketRate:  40,
+	NCRRsToWait:        3,
+	DebugLogger:        log.New(ioutil.Discard, "DEBUG: ", log.LstdFlags),
+	InfoLogger:         log.New(ioutil.Discard, "INFO: ", log.LstdFlags),
+	WarnLogger:         log.New(os.Stderr, "WARN: ", log.LstdFlags),
+}
+
 
 func startMockServer(quit <-chan bool, conn *net.UDPConn, filename string, chunkSize uint16, maxChunksInACR uint16, fileID uint32, fileData []byte) {
 	packetRateAddC := 10
@@ -370,7 +382,7 @@ func TestUpdateMetadata(t *testing.T) {
 	metadata.timeout = 3*time.Second
 	metadata.url = URI
 
-	err = updateMetadata(conn_client, metadata)
+	err = updateMetadata(conn_client, metadata, &testConfig)
 	if err != nil {
 		t.Fatalf("updateMetadata failed: %v", err)
 	}
@@ -388,7 +400,7 @@ func TestUpdateMetadata(t *testing.T) {
 	metadata.chunkMap[2] = true
 	// Simulate a file ID change and a new metadata request
 	metadata.fileID = 0xf00dbad1
-	err = updateMetadata(conn_client, metadata)
+	err = updateMetadata(conn_client, metadata, &testConfig)
 	if err != nil {
 		t.Fatalf("updateMetadata failed: %v", err)
 	}
@@ -437,7 +449,7 @@ func TestUpdateMetadataNotFound(t *testing.T) {
 	metadata.timeout = 3*time.Second
 	metadata.url = wrongURI
 
-	err = updateMetadata(conn_client, metadata)
+	err = updateMetadata(conn_client, metadata, &testConfig)
 	if err == nil {
 		t.Fatalf("updateMetadata should have failed. It didn't")
 	}
@@ -462,7 +474,8 @@ func TestRequestFile(t *testing.T) {
 		{"one char URL", "/", 12, 34, 0x1, 10},
 		{"filesize is a multiple of chunk size", "exact", 32, 4, 0x1337c001, 256},
 		{"maxChunksINACR = 1", "CR1", 64, 1, 0xc0de600d, 223},
-		{"maxChunksINACR = 2", "CR2", 64, 2, 0xf00d0dd, 1025},
+		{"maxChunksINACR = 2", "CR2", 4, 2, 0xf00d0dd, 2225},
+		{"large ACRs", "bigACR", 8, 300, 0xb16ac2, 3025},
 		{"File ID is 0", "zero", 54, 10, 0x00000000, 45},
 		{"Empty file", "empty", 12, 10, 0xc1ea2, 0},
 		{"Large file", "large", 0x100, 20, 0xb16f11e, 0x4abcd},
@@ -486,7 +499,7 @@ func TestRequestFile(t *testing.T) {
 			go startMockServer(quit, conn_server, tt.URI, tt.chunkSize, tt.maxChunksInACR, tt.fileID, data)
 			defer func() {quit <- true}()
 
-			err = RequestFile(IP, port, tt.URI, filename)
+			err = RequestFile(IP, port, tt.URI, filename, &testConfig)
 			if err != nil {
 				t.Fatalf("RequestFile failed : %v", err)
 			}
@@ -542,7 +555,7 @@ func TestConnectionMigration(t *testing.T) {
 	metadata.url = URI
 	metadata.packetRate = 10
 
-	err = updateMetadata(conn_client, metadata)
+	err = updateMetadata(conn_client, metadata, &testConfig)
 	if err != nil {
 		t.Fatalf("updateMetadata failed: %v", err)
 	}
@@ -553,7 +566,7 @@ func TestConnectionMigration(t *testing.T) {
 	}
 	defer metadata.localFile.Close()
 
-	err = getMissingChunks(conn_client, metadata)
+	err = getMissingChunks(conn_client, metadata, &testConfig)
 	if err != nil {
 		t.Fatalf("getMissingChunks failed: %v", err)
 	}
@@ -566,7 +579,7 @@ func TestConnectionMigration(t *testing.T) {
 	defer conn_client2.Close()
 
 	for metadata.firstMissing < metadata.fileSize {
-		err = getMissingChunks(conn_client2, metadata)
+		err = getMissingChunks(conn_client2, metadata, &testConfig)
 		if err != nil {
 			t.Fatalf("getMissingChunks failed: %v", err)
 		}
