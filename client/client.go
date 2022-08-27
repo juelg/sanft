@@ -195,7 +195,10 @@ retransmit:
 				}
 				// Update metadata
 				oldFileID := metadata.fileID
-				getMetadataFromMDRR(metadata, &mdrr)
+				err := getMetadataFromMDRR(metadata, &mdrr)
+				if err != nil {
+					return fmt.Errorf("invalid metadata: %w", err)
+				}
 				metadata.timeout = time.Since(t_send) * time.Duration(rtt2timeoutFactor) // Sorry to all the physicists who will see this; go only accepts to multiply values of the same type
 
 				if metadata.chunkMap == nil || metadata.fileID != oldFileID {
@@ -223,12 +226,25 @@ retransmit:
 
 // getMetadataFromMDRR overwrites relevant field in metadata with fields from
 // the MDRR.
-func getMetadataFromMDRR(metadata *fileMetadata, mdrr *messages.MDRR) {
+func getMetadataFromMDRR(metadata *fileMetadata, mdrr *messages.MDRR) error{
 	metadata.chunkSize = mdrr.ChunkSize
 	metadata.maxChunksInACR = mdrr.MaxChunksInACR
 	metadata.fileID = mdrr.FileID
 	metadata.fileSize = messages.Uint8_6_arr2int(&mdrr.FileSize)
 	metadata.checksum = mdrr.Checksum
+
+	// Perform some sanity checks on the metadata
+	if metadata.maxChunksInACR == 0 {
+		return errors.New("maxChunkInACR cannot be 0")
+	}
+	if metadata.chunkSize == 0 {
+		return errors.New("chunkSize cannot be 0")
+	}
+	if metadata.chunkSize > 65517 {
+		return fmt.Errorf("chunkSize is too large: %d, max is 65517", metadata.chunkSize)
+	}
+
+	return nil
 }
 
 // Sends one ACR to get missing chunks.

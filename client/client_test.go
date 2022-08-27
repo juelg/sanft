@@ -136,12 +136,11 @@ func startMockServer(quit <-chan bool, conn *net.UDPConn, filename string, chunk
 					}
 				}
 			}
-
 		}
 	}
 }
 
-func TestBuildACR(t *testing.T) {
+func FuzzBuildACR(f *testing.F) {
 	metadata := fileMetadata{}
 	metadata.token = [32]uint8{
 		0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
@@ -149,22 +148,39 @@ func TestBuildACR(t *testing.T) {
 		0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
 		0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
 	}
-	metadata.maxChunksInACR = 30
-	metadata.chunkMap = make(map[uint64]bool)
-	metadata.chunkMap[10] = true
-	metadata.fileSize = 25
-	metadata.fileID = 0xcafebabe
 
-	acr, requested := buildACR(&metadata)
+	f.Add(uint16(30), uint64(25), []byte{10}, uint32(0xcafebabe))
+	f.Fuzz(func(t *testing.T, maxChunksInACR uint16, fileSize uint64, receivedChunks []byte, fileID uint32) {
+		metadata.maxChunksInACR = maxChunksInACR
+		metadata.chunkMap = make(map[uint64]bool)
+		for _,rc := range receivedChunks {
+			metadata.chunkMap[uint64(rc)] = true
+		}
+		metadata.firstMissing = 0
+		for metadata.chunkMap[metadata.firstMissing] {
+			metadata.firstMissing ++
+		}
+		metadata.fileSize = fileSize
+		metadata.fileID = fileID
+
+		acr, requested := buildACR(&metadata)
+		err := checkValidACR(acr, requested, &metadata)
+		if err != nil {
+			t.Fatalf("Invalid ACR: %v", err)
+		}
+	})
+}
+
+func checkValidACR(acr *messages.ACR, requested []uint64, metadata *fileMetadata) error {
 	in_acr := make(map[uint64]bool)
 	n_requests := 0
 
 	// Check the metadata
 	if acr.Header.Token != metadata.token {
-		t.Fatalf("Invalid token in ACR. Expected %x got %x", metadata.token, acr.Header.Token)
+		return fmt.Errorf("Invalid token in ACR. Expected %x got %x", metadata.token, acr.Header.Token)
 	}
 	if acr.FileID != metadata.fileID {
-		t.Fatalf("Invalid file ID in ACR. Expected %x got %x", metadata.fileID, acr.FileID)
+		return fmt.Errorf("Invalid file ID in ACR. Expected %x got %x", metadata.fileID, acr.FileID)
 	}
 
 	// Check that the ACR is valid
@@ -172,32 +188,34 @@ func TestBuildACR(t *testing.T) {
 		offset := messages.Uint8_6_arr2int(&cr.ChunkOffset)
 		length := cr.Length
 		if length == 0 {
-			t.Fatalf("Invalid length (0) for chunk request in %v", acr)
+			return fmt.Errorf("Invalid length (0) for chunk request in %v", acr)
 		}
 		for i := uint64(0); i < uint64(length); i++ {
 			in_acr[offset+i] = true
 			if offset+i > metadata.fileSize {
-				t.Fatalf("Request for an out of bound chunk %d in ACR %v", offset+i, acr)
+				return fmt.Errorf("Request for an out of bound chunk %d in ACR %v", offset+i, acr)
 			}
 			if metadata.chunkMap[offset+i] {
-				t.Fatalf("Unexpected chunk request for already received chunk %d in ACR %v", offset+i, acr)
+				return fmt.Errorf("Unexpected chunk request for already received chunk %d in ACR %v", offset+i, acr)
 			}
 			n_requests++
 		}
 	}
 	if n_requests > int(metadata.maxChunksInACR) {
-		t.Fatalf("Too many chunks in chunk request : %d (max %d)", n_requests, metadata.maxChunksInACR)
+		return fmt.Errorf("Too many chunks in chunk request : %d (max %d)", n_requests, metadata.maxChunksInACR)
 	}
 
 	// Check that requested matches the id of the chunks requested in the ACR:
 	for _, r := range requested {
 		if !in_acr[r] {
-			t.Fatalf("Chunk %d is in requested but not in ACR", r)
+			return fmt.Errorf("Chunk %d is in requested but not in ACR", r)
 		}
 	}
 	if len(requested) != n_requests {
-		t.Fatalf("There is not the same number of chunks in requested (%d) and in ACR(%d)", len(requested), n_requests)
+		return fmt.Errorf("There is not the same number of chunks in requested (%d) and in ACR(%d)", len(requested), n_requests)
 	}
+
+	return nil
 }
 
 // Generate data, compute checksum, write data to file,
@@ -244,81 +262,40 @@ func TestChecksum(t *testing.T) {
 	}
 }
 
-func TestComputePacketRate(t *testing.T) {
-	n_expected := 40
-	timeMap := make(map[int]time.Time)
-	prevRate := uint32(20)
-	t0 := time.Now()
+func FuzzComputePacketRate(f *testing.F) {
+	f.Add(10, []byte{0,1,2,3,4,5,6,7,8,9}, []byte{50}, uint32(20))
+	f.Add(10, []byte{2,3,4,5,6,7,8,9}, []byte{100}, uint32(10))
+	f.Add(10, []byte{1,2,3,4,5,6,7,8,0,9}, []byte{80}, uint32(20))
+	// chunksArrived is the list of chunksNumber in the order in which they arrived
+	// arrivalTime is the time between each arrival in ms. If the list is not long enough, it loops.
+	f.Fuzz(func(t *testing.T, n_expected int, chunksArrived []byte, arrivalTime []byte, prevRate uint32) {
+		timeMap := make(map[int]time.Time)
+		var tNext time.Time
 
-	for i := 0; i < n_expected; i++ {
-		timeMap[i] = t0.Add(time.Duration(i * int(time.Second) / int(prevRate)))
-	}
-
-	newRate, err := computePacketRate(timeMap, n_expected, prevRate)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-
-	if newRate == 0 {
-		t.Fatalf("packetRate cannot be zero")
-	}
-
-	if newRate != prevRate {
-		t.Fatalf("New packetRate (%d) differs from previous packetRate (%d)", newRate, prevRate)
-	}
-}
-
-func TestComputePacketRateMissing(t *testing.T) {
-	n_expected := 324
-	timeMap := make(map[int]time.Time)
-	prevRate := uint32(2000)
-	t0 := time.Now()
-
-	for _, i := range []int{1, 4, 23, 24, 45, 46} {
-		timeMap[i] = t0.Add(time.Duration(i * int(time.Second) / int(prevRate)))
-	}
-
-	newRate, err := computePacketRate(timeMap, n_expected, prevRate)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-
-	if newRate == 0 {
-		t.Fatalf("packetRate cannot be zero")
-	}
-
-	if newRate > prevRate {
-		t.Fatalf("New packetRate (%d) is larger than previous packetRate (%d)", newRate, prevRate)
-	}
-}
-
-func TestComputePacketRateLate(t *testing.T) {
-	n_expected := 10
-	timeMap := make(map[int]time.Time)
-	prevRate := uint32(4)
-	t0 := time.Now()
-
-	for i := 0; i < n_expected; i++ {
-		timeMap[i] = t0.Add(time.Duration(i * int(time.Second) / int(prevRate)))
-	}
-
-	timeMap[0] = t0.Add(2 * time.Second)
-
-	newRate, err := computePacketRate(timeMap, n_expected, prevRate)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-
-	if newRate == 0 {
-		t.Fatalf("packetRate cannot be zero")
-	}
-
-	/*
-		if newRate > prevRate {
-			t.Fatalf("New packetRate (%d) is larger than previous packetRate (%d)", newRate, prevRate)
+		// Checks on inputs parameters
+		if prevRate == 0 || len(arrivalTime) == 0 || n_expected < 2 || len(chunksArrived) == 0 {
+			return
 		}
-	*/
+
+		for i,c := range chunksArrived {
+			if int(c) >= n_expected {
+				return
+			}
+			timeMap[i] = tNext
+			tNext = tNext.Add(time.Duration(arrivalTime[i%len(arrivalTime)])*time.Millisecond)
+		}
+
+		newRate, err := computePacketRate(timeMap, n_expected, prevRate)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+
+		if newRate == 0 {
+			t.Fatalf("packetRate cannot be zero")
+		}
+	})
 }
+
 
 func TestWriteChunkToFile(t *testing.T) {
 	var readBuf []byte
@@ -436,7 +413,7 @@ func TestUpdateMetadataNotFound(t *testing.T) {
 	wrongURI := "notfoo"
 	chunkSize := uint16(8)
 	maxChunksInACR := uint16(10)
-	fileID := uint32(0xbadbadba)
+	fileID := uint32(0xbad15bad)
 	data := []byte("Not important")
 	want := regexp.MustCompile(`not found`)
 	quit := make(chan bool)
@@ -472,21 +449,23 @@ func TestUpdateMetadataNotFound(t *testing.T) {
 func TestRequestFile(t *testing.T) {
 	IP := "127.0.0.200"
 	port := 6666
-	URI := "foo"
 	filename := "/tmp/sanftTestRequest.dat"
 	var tests = []struct {
 		name string
+		URI string
 		chunkSize uint16
 		maxChunksInACR uint16
 		fileID uint32
 		dataSize int
 	}{
-		{"filesize is less than chunk size", 64, 10, 0x00facade, 20},
-		{"filesize is a multiple of chunk size", 32, 4, 0x1337c001, 256},
-		{"maxChunksINACR = 1", 64, 1, 0xc0de600d, 223},
-		{"maxChunksINACR = 2", 64, 2, 0x0ddf00d, 1025},
-		{"File ID is 0", 54, 10, 0x00000000, 45},
-		{"Large file", 0x100, 20, 0xb16f11e, 0x4abcd},
+		{"filesize is less than chunk size", "small", 64, 10, 0x00facade, 20},
+		{"one char URL", "/", 12, 34, 0x1, 10},
+		{"filesize is a multiple of chunk size", "exact", 32, 4, 0x1337c001, 256},
+		{"maxChunksINACR = 1", "CR1", 64, 1, 0xc0de600d, 223},
+		{"maxChunksINACR = 2", "CR2", 64, 2, 0xf00d0dd, 1025},
+		{"File ID is 0", "zero", 54, 10, 0x00000000, 45},
+		{"Empty file", "empty", 12, 10, 0xc1ea2, 0},
+		{"Large file", "large", 0x100, 20, 0xb16f11e, 0x4abcd},
 	}
 
 	conn_server, err := messages.CreateServerSocket(IP, port)
@@ -504,10 +483,10 @@ func TestRequestFile(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			quit := make(chan bool)
 
-			go startMockServer(quit, conn_server, URI, tt.chunkSize, tt.maxChunksInACR, tt.fileID, data)
+			go startMockServer(quit, conn_server, tt.URI, tt.chunkSize, tt.maxChunksInACR, tt.fileID, data)
 			defer func() {quit <- true}()
 
-			err = RequestFile(IP, port, URI, filename)
+			err = RequestFile(IP, port, tt.URI, filename)
 			if err != nil {
 				t.Fatalf("RequestFile failed : %v", err)
 			}
