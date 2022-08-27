@@ -1,10 +1,8 @@
 package client
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -16,7 +14,7 @@ import (
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 )
 
-func startMockServer(quit chan bool, conn *net.UDPConn, filename string, chunkSize uint16, maxChunksInACR uint16, fileID uint32, fileData []byte) {
+func startMockServer(quit <-chan bool, conn *net.UDPConn, filename string, chunkSize uint16, maxChunksInACR uint16, fileID uint32, fileData []byte) {
 	packetRateAddC := 10
 	fileSize := uint64((len(fileData) + int(chunkSize-1))/int(chunkSize))
 	var checksum [32]byte
@@ -39,15 +37,16 @@ func startMockServer(quit chan bool, conn *net.UDPConn, filename string, chunkSi
 				if os.IsTimeout(errors.Unwrap(err)) {
 					continue
 				}
-				fmt.Printf("timeout: %v\n", err)
 				continue
 			}
-			addrData := new(bytes.Buffer)
-			binary.Write(addrData, binary.BigEndian, addr)
-			h := sha256.New()
-			_, err = h.Write(addrData.Bytes())
+			addrData, err := addr.AddrPort().MarshalBinary()
 			if err != nil {
-				fmt.Printf("Mock Server: Error with compute token: %v\n", err)
+				fmt.Printf("Mock server: can't compute token: %v\n", err)
+			}
+			h := sha256.New()
+			_, err = h.Write(addrData)
+			if err != nil {
+				fmt.Printf("Mock Server: can't compute token: %v\n", err)
 				return
 			}
 			copy(token[:], h.Sum(nil))
@@ -371,7 +370,7 @@ func TestUpdateMetadata(t *testing.T) {
 	URI := "foo"
 	chunkSize := uint16(8)
 	maxChunksInACR := uint16(10)
-	fileID := uint32(0x1337c001)
+	fileID := uint32(0xc0ffee11)
 	data := []byte("Not important")
 	quit := make(chan bool)
 
@@ -382,7 +381,7 @@ func TestUpdateMetadata(t *testing.T) {
 	defer conn_server.Close()
 
 	go startMockServer(quit, conn_server, URI, chunkSize, maxChunksInACR, fileID, data)
-	defer func() {fmt.Println("Closing server...");quit <- true}()
+	defer func() {quit <- true}()
 
     conn_client, err := messages.CreateClientSocket(IP, port)
     if err != nil{
@@ -437,7 +436,7 @@ func TestUpdateMetadataNotFound(t *testing.T) {
 	wrongURI := "notfoo"
 	chunkSize := uint16(8)
 	maxChunksInACR := uint16(10)
-	fileID := uint32(0x1337c001)
+	fileID := uint32(0xbadbadba)
 	data := []byte("Not important")
 	want := regexp.MustCompile(`not found`)
 	quit := make(chan bool)
@@ -485,6 +484,7 @@ func TestRequestFile(t *testing.T) {
 		{"filesize is less than chunk size", 64, 10, 0x00facade, 20},
 		{"filesize is a multiple of chunk size", 32, 4, 0x1337c001, 256},
 		{"maxChunksINACR = 1", 64, 1, 0xc0de600d, 223},
+		{"maxChunksINACR = 2", 64, 2, 0x0ddf00d, 1025},
 		{"File ID is 0", 54, 10, 0x00000000, 45},
 		{"Large file", 0x100, 20, 0xb16f11e, 0x4abcd},
 	}
@@ -529,5 +529,67 @@ func TestRequestFile(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestConnectionMigration(t *testing.T) {
+	IP := "127.0.0.200"
+	port := 6666
+	URI := "foo"
+	chunkSize := uint16(8)
+	maxChunksInACR := uint16(2)
+	fileID := uint32(0xd1ffc0)
+	data := []byte("The rabbit-hole went straight on like a tunnel for some way, and then dipped suddenly down, so suddenly that Alice had not a moment to think about stopping herself before she found herself falling down a very deep well.")
+	filename := "/tmp/sanftTest.dat"
+	quit := make(chan bool)
+
+    conn_server, err := messages.CreateServerSocket(IP, port)
+    if err != nil{
+        t.Fatalf(`Creating server failed: %v`, err)
+    }
+	defer conn_server.Close()
+
+	go startMockServer(quit, conn_server, URI, chunkSize, maxChunksInACR, fileID, data)
+	defer func() {quit <- true}()
+
+    conn_client, err := messages.CreateClientSocket(IP, port)
+    if err != nil{
+        t.Fatalf(`Creating client failed: %v`, err)
+    }
+	defer conn_client.Close()
+
+	metadata := new(fileMetadata)
+	metadata.timeout = 3*time.Second
+	metadata.url = URI
+	metadata.packetRate = 10
+
+	err = updateMetadata(conn_client, metadata)
+	if err != nil {
+		t.Fatalf("updateMetadata failed: %v", err)
+	}
+
+	metadata.localFile, err = os.Create(filename)
+	if err != nil {
+		t.Fatalf("Could not open file: %v", err)
+	}
+	defer metadata.localFile.Close()
+
+	err = getMissingChunks(conn_client, metadata)
+	if err != nil {
+		t.Fatalf("getMissingChunks failed: %v", err)
+	}
+
+	// Connection migration !
+    conn_client2, err := messages.CreateClientSocket(IP, port)
+    if err != nil{
+        t.Fatalf(`Creating client failed: %v`, err)
+    }
+	defer conn_client2.Close()
+
+	for metadata.firstMissing < metadata.fileSize {
+		err = getMissingChunks(conn_client2, metadata)
+		if err != nil {
+			t.Fatalf("getMissingChunks failed: %v", err)
+		}
 	}
 }

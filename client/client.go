@@ -28,6 +28,7 @@ type fileMetadata struct {
 
 	chunkMap       map[uint64]bool //chunkMap[chunk] == true iff chunk has been received
 	firstMissing   uint64          // The index of the first chunk not yet received
+	nReceived      int             // Number of chunks received. 
 
 	// Information on the connection
 
@@ -55,7 +56,7 @@ const (
 func RequestFile(address string, port int, URI string, localFilename string) error {
 	conn, err := messages.CreateClientSocket(address, port)
 	if err != nil {
-		return fmt.Errorf("Create client socket: %w", err)
+		return fmt.Errorf("create client socket: %w", err)
 	}
 	defer conn.Close()
 
@@ -71,7 +72,7 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 
 	localFile, err := os.Create(localFilename)
 	if err != nil {
-		return fmt.Errorf("Open file %s: %w", localFilename, err)
+		return fmt.Errorf("open file %s: %w", localFilename, err)
 	}
 	metadata.localFile = localFile
 	// Request chunks
@@ -81,16 +82,18 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 			localFile.Close()
 			return fmt.Errorf("get missing chunks: %w", err)
 		}
+		fmt.Printf("%s(0x%x): %d/%d chunks (%dchunk/s)\r", metadata.url, metadata.fileID, metadata.nReceived, metadata.fileSize, metadata.packetRate)
 	}
+	fmt.Println()
 	localFile.Close()
 
 	checksum, err := computeChecksum(localFilename)
 	if err != nil {
-		return fmt.Errorf("Compute checksum of %s: %w", localFilename, err)
+		return fmt.Errorf("compute checksum of %s: %w", localFilename, err)
 	}
 	if checksum != metadata.checksum {
 		os.Remove(localFilename)
-		return fmt.Errorf("Checksum not matching. Expected %x got %x", metadata.checksum, checksum)
+		return fmt.Errorf("checksum not matching. Expected %x got %x", metadata.checksum, checksum)
 	}
 
 	return nil
@@ -114,12 +117,12 @@ retransmit:
 				continue retransmit
 			}
 			// If this is not a timeout, it's safer to exit to see what happened
-			return fmt.Errorf("Send MDR: %w", err)
+			return fmt.Errorf("send MDR: %w", err)
 		}
 		deadline := t_send.Add(metadata.timeout)
 		err = conn.SetReadDeadline(deadline)
 		if err != nil {
-			return fmt.Errorf("Set deadline: %w", err)
+			return fmt.Errorf("set deadline: %w", err)
 		}
 
 	receive:
@@ -131,7 +134,7 @@ retransmit:
 					continue retransmit
 				} else {
 					// Otherwise, let's see what happened
-					return fmt.Errorf("Read from UDP: %w", err)
+					return fmt.Errorf("read from UDP: %w", err)
 				}
 			}
 			raw := buf[:n]
@@ -159,7 +162,7 @@ retransmit:
 				}
 				if header.Number != mdr.Header.Number {
 					// Not for us. Ignore it
-					log.Printf("INFO: Received response with wrong message number(%d instead of %d). Dropped\n", header.Number, mdr.Header.Number)
+					//log.Printf("DEBUG: Received response with wrong message number(%d instead of %d). Dropped\n", header.Number, mdr.Header.Number)
 					continue receive
 				}
 
@@ -181,13 +184,13 @@ retransmit:
 				ntm := response.(messages.NTM)
 				metadata.token = ntm.Token
 				// Note: even if this is expected in the protocol, this still counts as one retransmission
-				log.Printf("INFO: Updated token to %x (from %x). Retransmitting...\n", ntm.Token, mdr.Header.Token)
+				// log.Printf("DEBUG: Updated token to %x (from %x). Retransmitting...\n", ntm.Token, mdr.Header.Token)
 				continue retransmit
 			case messages.MDRR:
 				mdrr := response.(messages.MDRR)
 				if mdrr.Header.Number != mdr.Header.Number {
 					// This message is not for us. Ignore it
-					log.Printf("INFO: Received response with wrong message number(%d instead of %d). Dropped\n", mdrr.Header.Number, mdr.Header.Number)
+					// log.Printf("DEBUG: Received response with wrong message number(%d instead of %d). Dropped\n", mdrr.Header.Number, mdr.Header.Number)
 					continue receive
 				}
 				// Update metadata
@@ -205,10 +208,11 @@ retransmit:
 					}
 					metadata.chunkMap = make(map[uint64]bool, metadata.fileSize)
 					metadata.firstMissing = 0
+					metadata.nReceived = 0
 				}
 				return nil
 			default:
-				log.Printf("WARN: Received unexpected response of type %T. Dropped\n", response)
+				// log.Printf("DEBUG: Received unexpected response of type %T. Dropped\n", response)
 				continue receive
 			}
 		}
@@ -234,15 +238,15 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 	buf := make([]byte, 0x10000) // 64kB
 	// Build an ACR and send it
 	acr, requested := buildACR(metadata)
-	log.Printf("INFO: Requesting chunks %v\n", requested)
+	//log.Printf("DEBUG: Requesting chunks %v\n", requested)
 	n_cr := len(requested)
 	if n_cr == 0 {
-		return fmt.Errorf("No missing chunks.%v", metadata)
+		return fmt.Errorf("no missing chunks.%v", metadata)
 	}
 	t_send := time.Now()
 	err := acr.Send(conn)
 	if err != nil {
-		return fmt.Errorf("Send ACR: %w", err)
+		return fmt.Errorf("send ACR: %w", err)
 	}
 	deadline := t_send.Add(metadata.timeout)
 	mapTimeCRRs := make(map[int]time.Time)
@@ -250,7 +254,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 	for time.Now().Before(deadline) {
 		err = conn.SetReadDeadline(deadline)
 		if err != nil {
-			return fmt.Errorf("Set deadline: %w", err)
+			return fmt.Errorf("set deadline: %w", err)
 		}
 		n, _, err := conn.ReadFromUDP(buf)
 		t_recv := time.Now()
@@ -260,7 +264,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 				continue
 			} else {
 				// Return to see what the error was
-				return fmt.Errorf("Read from UDP: %w", err)
+				return fmt.Errorf("read from UDP: %w", err)
 			}
 		}
 		raw := buf[:n]
@@ -283,7 +287,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 			header := response.(messages.ServerHeader)
 			if header.Number != acr.Header.Number {
 				// Ignore it
-				log.Printf("INFO: Received response with wrong message number(%d instead of %d). Dropped\n", header.Number, acr.Header.Number)
+				// log.Printf("DEBUG: Received response with wrong message number(%d instead of %d). Dropped\n", header.Number, acr.Header.Number)
 				continue
 			}
 			switch header.Error {
@@ -324,7 +328,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 			ntm := response.(messages.NTM)
 			if ntm.Token != metadata.token {
 				metadata.token = ntm.Token
-				log.Printf("INFO: Updated token to %x (from %x). Retransmitting...\n", ntm.Token, acr.Header.Token)
+				// log.Printf("DEBUG: Updated token to %x (from %x). Retransmitting...\n", ntm.Token, acr.Header.Token)
 				return nil // We shouldn't receive any further chunks if we used a wrong token.
 				// Should it be an error, though ? No, we just want to resume normally
 			}
@@ -332,7 +336,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 			crr := response.(messages.CRR)
 			if crr.Header.Number != acr.Header.Number {
 				// This message is not for us. Ignore it
-				log.Printf("INFO: Received response with wrong message number(%d instead of %d). Dropped\n", crr.Header.Number, acr.Header.Number)
+				// log.Printf("INFO: Received response with wrong message number(%d instead of %d). Dropped\n", crr.Header.Number, acr.Header.Number)
 				continue
 			}
 			chunkNumber := messages.Uint8_6_arr2int(&crr.ChunkNumber)
@@ -386,7 +390,6 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 			if err != nil {
 				return fmt.Errorf("compute new packetRate: %w", err)
 			}
-			log.Printf("INFO: Updated packetRate: before:%d, now:%d", metadata.packetRate, newPacketRate)
 			metadata.packetRate = newPacketRate
 		}
 	} else {
@@ -431,7 +434,7 @@ func buildACR(metadata *fileMetadata) (acr *messages.ACR, requested []uint64) {
 func writeChunkToFile(metadata *fileMetadata, chunkNumber uint64, data []byte, file *os.File) error {
 	if !metadata.chunkMap[chunkNumber] {
 		if chunkNumber != metadata.fileSize - 1 && len(data) != int(metadata.chunkSize) {
-			return fmt.Errorf("Invalid chunk size. Expected %d got %d", metadata.chunkSize, len(data))
+			return fmt.Errorf("invalid chunk size. Expected %d got %d", metadata.chunkSize, len(data))
 		}
 		offset := int64(chunkNumber) * int64(metadata.chunkSize)
 		_, err := file.WriteAt(data, offset)
@@ -440,6 +443,7 @@ func writeChunkToFile(metadata *fileMetadata, chunkNumber uint64, data []byte, f
 		}
 		// Update chunkMap and first Missing
 		metadata.chunkMap[chunkNumber] = true
+		metadata.nReceived ++
 		for metadata.chunkMap[metadata.firstMissing] {
 			metadata.firstMissing++
 		}
@@ -457,7 +461,7 @@ func computePacketRate(timeReceiveCRR map[int]time.Time, n_expected int, packetR
 		return 0, fmt.Errorf("packetRate must be positive")
 	}
 	if n_expected <= 1 {
-		return 0, fmt.Errorf("Can only compute a packetRate if more than 2 packets were expected")
+		return 0, fmt.Errorf("can only compute a packetRate if more than 2 packets were expected")
 	}
 	var timeFirst, timeLast time.Time
 	indexFirst := -1
@@ -476,7 +480,7 @@ func computePacketRate(timeReceiveCRR map[int]time.Time, n_expected int, packetR
 		}
 	}
 	if n_received == 0 {
-		return 0, fmt.Errorf("Cannot measure a rate when no packet was received")
+		return 0, fmt.Errorf("cannot measure a rate when no packet was received")
 	}
 
 	var estimatedFirst, estimatedLast time.Time
@@ -510,7 +514,7 @@ func computePacketRate(timeReceiveCRR map[int]time.Time, n_expected int, packetR
 		return 1, nil
 	}
 	if math.IsNaN(measuredRate) {
-		return 0, fmt.Errorf("Measured rate is NaN.")
+		return 0, fmt.Errorf("measured rate is NaN.")
 	}
 	return uint32(measuredRate), nil
 }
@@ -519,7 +523,7 @@ func computeChecksum(filename string) ([32]byte, error) {
 	var hash [32]byte
 	data, err := os.ReadFile(filename)
 	if err != nil {
-		return hash, fmt.Errorf("Compute checksum: %w", err)
+		return hash, fmt.Errorf("compute checksum: %w", err)
 	}
 	h := sha256.New()
 	h.Write(data)
