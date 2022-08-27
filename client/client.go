@@ -26,27 +26,28 @@ type fileMetadata struct {
 
 	// Information on missing chunks
 
-	chunkMap     map[uint64]bool //chunkMap[chunk] == true iff chunk has been received
-	firstMissing uint64          // The index of the first chunk not yet received
+	chunkMap       map[uint64]bool //chunkMap[chunk] == true iff chunk has been received
+	firstMissing   uint64          // The index of the first chunk not yet received
 
 	// Information on the connection
 
 	timeout        time.Duration
 	packetRate     uint32
 	messageCounter uint8
+
+	// Local file pointer
+
+	localFile      *os.File
 }
 
 // TODO[or not]: make this configurable
 const (
-	originalTimeout    time.Duration = 3*time.Second
+	initialTimeout    time.Duration = 3*time.Second
 	retransmissionsMDR int = 5 // Max number of retransmissions when sending an MDR
 	rtt2timeoutFactor  int = 2 // timeout = rtt2timeoutFactor * rtt
-	initialPacketRate  uint32 = 2
+	initialPacketRate  uint32 = 10
 	nCRRsToWait        int = 3 // Number of virtual CRR to wait for the next CRR to arrive
 )
-
-// General TODO : Check error handling at each step. For now nothing happens
-// when the server sends an error for example.
 
 // RequestFile connects to the server at address:port and tries to perform a
 // complete SANFT exchange to request the file identified by URI. If the
@@ -59,30 +60,35 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 	defer conn.Close()
 
 	// Request file metadata
-	metadata, err := getMetadata(conn, URI, retransmissionsMDR, originalTimeout)
+	metadata := new(fileMetadata)
+	metadata.url = URI
+	metadata.timeout = initialTimeout
+	metadata.packetRate = initialPacketRate
+	err = updateMetadata(conn, metadata)
 	if err != nil {
 		return fmt.Errorf("get metadata: %w", err)
 	}
 
 	localFile, err := os.Create(localFilename)
-	defer localFile.Close()
 	if err != nil {
 		return fmt.Errorf("Open file %s: %w", localFilename, err)
 	}
+	metadata.localFile = localFile
 	// Request chunks
 	for metadata.firstMissing <= metadata.fileSize {
-		err := getMissingChunks(conn, metadata, localFile)
+		err := getMissingChunks(conn, metadata)
 		if err != nil {
+			localFile.Close()
 			return fmt.Errorf("get missing chunks: %w", err)
 		}
 	}
+	localFile.Close()
 
 	checksum, err := computeChecksum(localFilename)
 	if err != nil {
 		return fmt.Errorf("Compute checksum of %s: %w", localFilename, err)
 	}
 	if checksum != metadata.checksum {
-		localFile.Close()
 		os.Remove(localFilename)
 		return fmt.Errorf("Checksum not matching. Expected %x got %x", metadata.checksum, checksum)
 	}
@@ -90,22 +96,17 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 	return nil
 }
 
-// Send a MetaData Request to the server and parse the response to populate
-// a fileMetaData struct
-//
-// For a chance at a successful request, retransmissions needs to be larger
-// than 1.
-func getMetadata(conn *net.UDPConn, URL string, retransmissions int, timeout time.Duration) (*fileMetadata, error) {
+// updateMetadata sends a MetaData Request to the server and parses the response
+// to update metadata.
+func updateMetadata(conn *net.UDPConn, metadata *fileMetadata) error {
 	var buf []byte
-	metadata := new(fileMetadata)
-	var messageCounter uint8
-	// Send a Metadatarequest with a zero token
-	// It will probably (certainly) be invalid but in that case just wait for the NTM and update it
-
+	if metadata.timeout == 0 {
+		return errors.New("metadata.timeout cannot be 0.")
+	}
 retransmit:
-	for i := 0; i < retransmissions; i++ {
-		mdr := messages.GetMDR(messageCounter, &metadata.token, URL)
-		messageCounter++
+	for i := 0; i < retransmissionsMDR; i++ {
+		mdr := messages.GetMDR(metadata.messageCounter, &metadata.token, metadata.url)
+		metadata.messageCounter++
 		t_send := time.Now()
 		err := mdr.Send(conn)
 		if err != nil {
@@ -113,12 +114,12 @@ retransmit:
 				continue retransmit
 			}
 			// If this is not a timeout, it's safer to exit to see what happened
-			return nil, fmt.Errorf("Send MDR: %w", err)
+			return fmt.Errorf("Send MDR: %w", err)
 		}
-		deadline := t_send.Add(timeout)
+		deadline := t_send.Add(metadata.timeout)
 		err = conn.SetReadDeadline(deadline)
 		if err != nil {
-			return nil, fmt.Errorf("Set deadline: %w", err)
+			return fmt.Errorf("Set deadline: %w", err)
 		}
 
 	receive:
@@ -129,16 +130,15 @@ retransmit:
 					// If it's a timeout, retransmit
 					continue retransmit
 				} else {
-					// Otherwise ? IDK
-					// TODO: Add error handling for other errors
-					return nil, fmt.Errorf("Read from UDP: %w", err)
+					// Otherwise, let's see what happened
+					return fmt.Errorf("Read from UDP: %w", err)
 				}
 			}
 			response, err := messages.ParseServer(&buf)
 			if err != nil {
 				if errors.Is(err, new(messages.UnsupporedVersionError)) {
 					// We can't do anything if we don't speak the same language
-					return nil, fmt.Errorf("parse server message: %w", err)
+					return fmt.Errorf("parse server message: %w", err)
 				} else if errors.Is(err, new(messages.UnsupporedTypeError)) ||
 				errors.Is(err, new(messages.WrongPacketLengthError)) {
 					// Ignore unknown messages, but still log the error
@@ -170,11 +170,11 @@ retransmit:
 						// by the parser, so it means it's a version we support.
 						// This is an answer to a message we sent. We only
 						// support one version. Something's not right -> Error
-						return nil, fmt.Errorf("MDRR server error: the server doesn't support our protocol version (%d) and answered with version %d", messages.VERS, header.Version)
+						return fmt.Errorf("MDRR server error: the server doesn't support our protocol version (%d) and answered with version %d", mdr.Header.Version, header.Version)
 					case messages.FileNotFound:
-						return nil, fmt.Errorf("MDRR server error: File not found on server")
+						return fmt.Errorf("MDRR server error: File not found on server")
 					default:
-						return nil, fmt.Errorf("MDRR server error: Unknown error code for MDRR %d", header.Error)
+						return fmt.Errorf("MDRR server error: Unknown error code for MDRR %d", header.Error)
 				}
 			case messages.NTM:
 				ntm := response.(messages.NTM)
@@ -189,21 +189,23 @@ retransmit:
 					log.Printf("INFO: Received response with wrong message number(%d instead of %d). Dropped\n", mdrr.Header.Number, mdr.Header.Number)
 					continue receive
 				}
-				// Get metadata from the response
-				metadata.url = URL
-				metadata.chunkSize = mdrr.ChunkSize
-				metadata.maxChunksInACR = mdrr.MaxChunksInACR
-				metadata.fileID = mdrr.FileID
-				metadata.fileSize = messages.Uint8_6_arr2int(&mdrr.FileSize)
-				metadata.checksum = mdrr.Checksum
-
-				// Get metadata from RTT
+				// Update metadata
+				oldFileID := metadata.fileID
+				getMetadataFromMDRR(metadata, &mdrr)
 				metadata.timeout = time.Since(t_send) * time.Duration(rtt2timeoutFactor) // Sorry to all the physicists who will see this; go only accepts to multiply values of the same type
-				metadata.packetRate = initialPacketRate
-				metadata.messageCounter = messageCounter
 
-				metadata.chunkMap = make(map[uint64]bool, metadata.fileSize)
-				return metadata, nil
+				if metadata.chunkMap == nil || metadata.fileID != oldFileID {
+					// Erase the old file
+					if metadata.localFile != nil {
+						err := metadata.localFile.Truncate(0)
+						if err != nil {
+							return fmt.Errorf("erase file content of %s: %w", metadata.localFile.Name(), err)
+						}
+					}
+					metadata.chunkMap = make(map[uint64]bool, metadata.fileSize)
+					metadata.firstMissing = 0
+				}
+				return nil
 			default:
 				log.Printf("WARN: Received unexpected response of type %T. Dropped\n", response)
 				continue receive
@@ -211,13 +213,23 @@ retransmit:
 		}
 
 	}
-	return nil, fmt.Errorf("Could not get metadata from server after %d retransmissions", retransmissionsMDR)
+	return fmt.Errorf("Could not get metadata from server after %d retransmissions", retransmissionsMDR)
+}
+
+// getMetadataFromMDRR overwrites relevant field in metadata with fields from
+// the MDRR.
+func getMetadataFromMDRR(metadata *fileMetadata, mdrr *messages.MDRR) {
+	metadata.chunkSize = mdrr.ChunkSize
+	metadata.maxChunksInACR = mdrr.MaxChunksInACR
+	metadata.fileID = mdrr.FileID
+	metadata.fileSize = messages.Uint8_6_arr2int(&mdrr.FileSize)
+	metadata.checksum = mdrr.Checksum
 }
 
 // Sends one ACR to get missing chunks.
 // This function also receives the CRRs, write them to localFile, update the
 // chunkMap and perform packet rate measurements.
-func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.File) error {
+func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 	var buf []byte
 	// Build an ACR and send it
 	acr, requested := buildACR(metadata)
@@ -242,7 +254,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 				// If it's a timeout, continue in case the deadline was extended
 				continue
 			} else {
-				// TODO: Add error handling for other errors
+				// Return to see what the error was
 				return fmt.Errorf("Read from UDP: %w", err)
 			}
 		}
@@ -273,17 +285,12 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 				return fmt.Errorf("CRR server error: the server doesn't support our protocol version (%d) and answered with version %d", messages.VERS, header.Version)
 			case messages.InvalidFileID:
 				// Request new metadata and update it
-				// TODO: Modify getMetadata so that it can use what we already know: e.g. the token.
-				newMetadata, err := getMetadata(conn, metadata.url, retransmissionsMDR, metadata.timeout)
+				oldFileID := metadata.fileID
+				err := updateMetadata(conn, metadata)
+				log.Printf("INFO: Updated metadata. Old fileID:%x, new fileID:%x\n", oldFileID, metadata.fileID)
 				if err != nil {
 					return fmt.Errorf("get metadata after invalid fileID: %w", err)
 				}
-				// Let's keep the old packetRate
-				oldPacketRate := metadata.packetRate
-				log.Printf("INFO: Updated metadata. Old fileID:%x, new fileID:%x\n", metadata.fileID, newMetadata.fileID)
-				// TODO: Does this actually replace metadata with newMetadata ?
-				metadata = newMetadata
-				metadata.packetRate = oldPacketRate
 			case messages.TooManyChunks:
 				// Let's check
 				if n_cr > int(metadata.maxChunksInACR) {
@@ -356,9 +363,9 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 			mapTimeCRRs[chunkIndexInACR] = t_recv
 			deadline = t_recv.Add(time.Duration(uint64(nCRRsToWait)*uint64(time.Second)/uint64(metadata.packetRate)))
 
-			err = writeChunkToFile(metadata, chunkNumber, crr.Data, localFile)
+			err = writeChunkToFile(metadata, chunkNumber, crr.Data, metadata.localFile)
 			if err != nil {
-				log.Printf("WARN: Could not write chunk #%d to file %s : %v", chunkNumber, localFile.Name(), err)
+				log.Printf("WARN: Could not write chunk #%d to file %s : %v", chunkNumber, metadata.localFile.Name(), err)
 				continue
 			}
 		default:
