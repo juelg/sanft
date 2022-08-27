@@ -134,7 +134,6 @@ func startMockServer(quit chan bool, conn *net.UDPConn, filename string, chunkSi
 							fmt.Printf("Mock Server: Error while sending CRR: %v\n", err)
 						}
 						tNext = time.Now().Add(time.Second/time.Duration(packetRate))
-						break
 					}
 				}
 			}
@@ -476,46 +475,59 @@ func TestRequestFile(t *testing.T) {
 	port := 6666
 	URI := "foo"
 	filename := "/tmp/sanftTestRequest.dat"
-	chunkSize := uint16(64)
-	maxChunksInACR := uint16(4)
-	fileID := uint32(0x1337c001)
-	dataSize := 456
-	data := make([]byte, dataSize)
-	_, err := rand.Read(data)
-	if err != nil {
-		t.Errorf("Could not read random data")
+	var tests = []struct {
+		name string
+		chunkSize uint16
+		maxChunksInACR uint16
+		fileID uint32
+		dataSize int
+	}{
+		{"filesize is less than chunk size", 64, 10, 0x00facade, 20},
+		{"filesize is a multiple of chunk size", 32, 4, 0x1337c001, 256},
+		{"maxChunksINACR = 1", 64, 1, 0xc0de600d, 223},
+		{"File ID is 0", 54, 10, 0x00000000, 45},
+		{"Large file", 0x100, 20, 0xb16f11e, 0x4abcd},
 	}
-	fmt.Printf("Random data: %x\n", data)
-	quit := make(chan bool)
 
-    conn_server, err := messages.CreateServerSocket(IP, port)
-    if err != nil{
-        t.Fatalf(`Creating server failed: %v`, err)
-    }
+	conn_server, err := messages.CreateServerSocket(IP, port)
+	if err != nil{
+		t.Fatalf(`Creating server failed: %v`, err)
+	}
 	defer conn_server.Close()
 
-	go startMockServer(quit, conn_server, URI, chunkSize, maxChunksInACR, fileID, data)
-	defer func() {quit <- true}()
-
-	err = RequestFile(IP, port, URI, filename)
-	if err != nil {
-		t.Fatalf("RequestFile failed : %v", err)
-	}
-
-	// Check that the file exists and that the data is correct
-	fileData, err := os.ReadFile(filename)
-	if err != nil {
-		t.Fatalf("Could not open created file: %v", err)
-	}
-	defer os.Remove(filename)
-
-	if len(fileData) != len(data) {
-		t.Fatalf("The received file doesn't have the right length. Expected %d got %d", len(data), len(fileData))
-	}
-
-	for i,b := range fileData {
-		if b != data[i] {
-			t.Fatalf("The received data and sent data differ at position %d. Sent: %x; Received: %x", i, data, fileData)
+	for _, tt := range tests {
+		data := make([]byte, tt.dataSize)
+		_, err := rand.Read(data)
+		if err != nil {
+			t.Errorf("Could not read random data")
 		}
+		t.Run(tt.name, func(t *testing.T) {
+			quit := make(chan bool)
+
+			go startMockServer(quit, conn_server, URI, tt.chunkSize, tt.maxChunksInACR, tt.fileID, data)
+			defer func() {quit <- true}()
+
+			err = RequestFile(IP, port, URI, filename)
+			if err != nil {
+				t.Fatalf("RequestFile failed : %v", err)
+			}
+
+			// Check that the file exists and that the data is correct
+			fileData, err := os.ReadFile(filename)
+			if err != nil {
+				t.Fatalf("Could not open created file: %v", err)
+			}
+			defer os.Remove(filename)
+
+			if len(fileData) != len(data) {
+				t.Fatalf("The received file doesn't have the right length. Expected %d got %d", len(data), len(fileData))
+			}
+
+			for i,b := range fileData {
+				if b != data[i] {
+					t.Fatalf("The received data and sent data differ at position %d. Sent: %x; Received: %x", i, data, fileData)
+				}
+			}
+		})
 	}
 }

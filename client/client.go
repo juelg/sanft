@@ -234,6 +234,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 	buf := make([]byte, 0x10000) // 64kB
 	// Build an ACR and send it
 	acr, requested := buildACR(metadata)
+	log.Printf("INFO: Requesting chunks %v\n", requested)
 	n_cr := len(requested)
 	if n_cr == 0 {
 		return fmt.Errorf("No missing chunks.%v", metadata)
@@ -366,7 +367,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata) error {
 			}
 			received = true
 			mapTimeCRRs[chunkIndexInACR] = t_recv
-			deadline = t_recv.Add(time.Duration(nCRRsToWait)*time.Second/time.Duration(metadata.packetRate))
+			deadline = t_recv.Add(time.Duration(nCRRsToWait+n_cr-chunkIndexInACR)*time.Second/time.Duration(metadata.packetRate))
 
 			err = writeChunkToFile(metadata, chunkNumber, crr.Data, metadata.localFile)
 			if err != nil {
