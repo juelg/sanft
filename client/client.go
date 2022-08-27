@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"net"
 	"os"
@@ -81,7 +82,8 @@ func RequestFile(address string, port int, URI string, localFilename string) err
 		return fmt.Errorf("Compute checksum of %s: %w", localFilename, err)
 	}
 	if checksum != metadata.checksum {
-		// TODO: Delete file (and retry ?)
+		localFile.Close()
+		os.Remove(localFilename)
 		return fmt.Errorf("Checksum not matching. Expected %x got %x", metadata.checksum, checksum)
 	}
 
@@ -98,12 +100,11 @@ func getMetadata(conn *net.UDPConn, URL string, retransmissions int, timeout tim
 	metadata := new(fileMetadata)
 	var messageCounter uint8
 	// Send a Metadatarequest with a zero token
-	// It will probably (certainly) be invalid but in that case just take the
-	mdr := messages.GetMDR(messageCounter, &metadata.token, URL)
+	// It will probably (certainly) be invalid but in that case just wait for the NTM and update it
 
 retransmit:
 	for i := 0; i < retransmissions; i++ {
-		mdr.Header.Number = messageCounter
+		mdr := messages.GetMDR(messageCounter, &metadata.token, URL)
 		messageCounter++
 		t_send := time.Now()
 		err := mdr.Send(conn)
@@ -135,17 +136,16 @@ retransmit:
 			}
 			response, err := messages.ParseServer(&buf)
 			if err != nil {
-				// This either means that:
-				// - or binary.Read fails for some other reason
-				// TODO: Investigate on which it is and act accordingly
 				if errors.Is(err, new(messages.UnsupporedVersionError)) {
 					// We can't do anything if we don't speak the same language
 					return nil, fmt.Errorf("parse server message: %w", err)
 				} else if errors.Is(err, new(messages.UnsupporedTypeError)) ||
 				errors.Is(err, new(messages.WrongPacketLengthError)) {
-					// TODO
+					// Ignore unknown messages, but still log the error
+					log.Printf("WARN: Invalid response received: %v. Dropped response:%x\n", err, buf)
+					continue receive
 				}
-				fmt.Printf("Unknown error while parsing response: %v\nResponse:%x\nContinuing...\n", err, buf)
+				log.Printf("WARN: Unknown error while parsing response: %v. Dropped response:%x\n", err, buf)
 				continue receive
 			}
 			switch response.(type) {
@@ -153,10 +153,12 @@ retransmit:
 				header := response.(messages.ServerHeader)
 				if header.Type != messages.MDRR_t {
 					// Ignore it
+					log.Printf("WARN: Unexpected server header of type %d. Dropped response: %v\n", header.Type, header)
 					continue receive
 				}
 				if header.Number != mdr.Header.Number {
 					// Not for us. Ignore it
+					log.Printf("INFO: Received response with wrong message number(%d instead of %d). Dropped\n", header.Number, mdr.Header.Number)
 					continue receive
 				}
 
@@ -178,11 +180,13 @@ retransmit:
 				ntm := response.(messages.NTM)
 				metadata.token = ntm.Token
 				// Note: even if this is expected in the protocol, this still counts as one retransmission
+				log.Printf("INFO: Updated token to %x (from %x). Retransmitting...\n", ntm.Token, mdr.Header.Token)
 				continue retransmit
 			case messages.MDRR:
 				mdrr := response.(messages.MDRR)
 				if mdrr.Header.Number != mdr.Header.Number {
 					// This message is not for us. Ignore it
+					log.Printf("INFO: Received response with wrong message number(%d instead of %d). Dropped\n", mdrr.Header.Number, mdr.Header.Number)
 					continue receive
 				}
 				// Get metadata from the response
@@ -201,6 +205,7 @@ retransmit:
 				metadata.chunkMap = make(map[uint64]bool, metadata.fileSize)
 				return metadata, nil
 			default:
+				log.Printf("WARN: Received unexpected response of type %T. Dropped\n", response)
 				continue receive
 			}
 		}
@@ -233,7 +238,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 		_, _, err := conn.ReadFromUDP(buf)
 		t_recv := time.Now()
 		if err != nil {
-			if errors.Is(err, os.ErrDeadlineExceeded) {
+			if os.IsTimeout(err) {
 				// If it's a timeout, continue in case the deadline was extended
 				continue
 			} else {
@@ -243,8 +248,16 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 		}
 		response, err := messages.ParseServer(&buf)
 		if err != nil {
-			// TODO: Error handling
-			fmt.Printf("Error while parsing response: %v\nResponse:%x\n", err, buf)
+			if errors.Is(err, new(messages.UnsupporedVersionError)) {
+				// We can't do anything if we don't speak the same language
+				return fmt.Errorf("parse server message: %w", err)
+			} else if errors.Is(err, new(messages.UnsupporedTypeError)) ||
+			errors.Is(err, new(messages.WrongPacketLengthError)) {
+				// Ignore unknown messages, but still log the error
+				log.Printf("WARN: Invalid response received: %v. Dropped response:%x\n", err, buf)
+				continue
+			}
+			log.Printf("WARN: Unknown error while parsing response: %v. Dropped response:%x\n", err, buf)
 			continue
 		}
 		switch response.(type) {
@@ -252,6 +265,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 			header := response.(messages.ServerHeader)
 			if header.Number != acr.Header.Number {
 				// Ignore it
+				log.Printf("INFO: Received response with wrong message number(%d instead of %d). Dropped\n", header.Number, acr.Header.Number)
 				continue
 			}
 			switch header.Error {
@@ -259,12 +273,14 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 				return fmt.Errorf("CRR server error: the server doesn't support our protocol version (%d) and answered with version %d", messages.VERS, header.Version)
 			case messages.InvalidFileID:
 				// Request new metadata and update it
+				// TODO: Modify getMetadata so that it can use what we already know: e.g. the token.
 				newMetadata, err := getMetadata(conn, metadata.url, retransmissionsMDR, metadata.timeout)
 				if err != nil {
 					return fmt.Errorf("get metadata after invalid fileID: %w", err)
 				}
 				// Let's keep the old packetRate
 				oldPacketRate := metadata.packetRate
+				log.Printf("INFO: Updated metadata. Old fileID:%x, new fileID:%x\n", metadata.fileID, newMetadata.fileID)
 				// TODO: Does this actually replace metadata with newMetadata ?
 				metadata = newMetadata
 				metadata.packetRate = oldPacketRate
@@ -274,7 +290,8 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 					// Our mistake... Let's throw an error to investigate
 					return fmt.Errorf("malformed ACR: we requested %d chunks in an ACR. Max is %d. (%v)", n_cr, metadata.maxChunksInACR, acr)
 				} else {
-					// TODO: Investigate (with a MDR) or ignore
+					log.Printf("WARN: Received TooManyChunks error for ACR %v. MaxChunksInACR=%d; # of chunks in ACR:%d. Ignored...\n", acr, metadata.maxChunksInACR, n_cr)
+					// TODO: Send a MDR to update metadata
 					continue
 				}
 			case messages.ZeroLengthCR:
@@ -285,7 +302,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 						return fmt.Errorf("malformed ACR: we sent a CR with length 0. (%v)", acr)
 					}
 				}
-				// TODO: Investigate (with a MDR) or ignore
+				log.Printf("WARN: Received ZeroLengthCR error for ACR %v. Ignored.\n", acr)
 				continue
 			default:
 				return fmt.Errorf("CRR server error: Unknown error code for CRR %d", header.Error)
@@ -294,13 +311,15 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 			ntm := response.(messages.NTM)
 			if ntm.Token != metadata.token {
 				metadata.token = ntm.Token
+				log.Printf("INFO: Updated token to %x (from %x). Retransmitting...\n", ntm.Token, acr.Header.Token)
 				return nil // We shouldn't receive any further chunks if we used a wrong token.
-				// Should it be an error, though ?
+				// Should it be an error, though ? No, we just want to resume normally
 			}
 		case messages.CRR:
 			crr := response.(messages.CRR)
 			if crr.Header.Number != acr.Header.Number {
 				// This message is not for us. Ignore it
+				log.Printf("INFO: Received response with wrong message number(%d instead of %d). Dropped\n", crr.Header.Number, acr.Header.Number)
 				continue
 			}
 			chunkNumber := messages.Uint8_6_arr2int(&crr.ChunkNumber)
@@ -314,6 +333,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 			}
 			if chunkIndexInACR == -1 {
 				// This is not a chunk we requested. Ignore it.
+				log.Printf("WARN: Received CRR for unrequested chunk %d. (The requested chunks are %v). Dropped.\n", chunkNumber, requested)
 				continue
 			}
 			// We need to check that there is no error
@@ -327,7 +347,8 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 					// That's our fault. Let's throw an error to investigate
 					return fmt.Errorf("malformed ACR: we requested chunk #%d for a file of size %d (%v)", chunkNumber, metadata.fileSize, acr)
 				} else {
-					// TODO: Investigate (with a MDR) or ignore
+					log.Printf("WARN: Received ChunkOutOfBounds error for chunk #%d in file of size %d. (%v)\n", chunkNumber, metadata.fileSize, acr)
+					// TODO: Send new MDR to update metadata just in case
 					continue
 				}
 			}
@@ -337,20 +358,23 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, localFile *os.F
 
 			err = writeChunkToFile(metadata, chunkNumber, crr.Data, localFile)
 			if err != nil {
-				// TODO: error handling
+				log.Printf("WARN: Could not write chunk #%d to file %s : %v", chunkNumber, localFile.Name(), err)
 				continue
 			}
 		default:
 			// Ignore irrelevant messages
+			log.Printf("WARN: Received unexpected response type to ACR: %T. Dropped...\n", response)
 			continue
 		}
 	}
 	if received {
-		newPacketRate, err := computePacketRate(mapTimeCRRs, n_cr, metadata.packetRate)
-		if err != nil {
-			return fmt.Errorf("compute new packetRate: %w", err)
+		if n_cr > 1 {
+			newPacketRate, err := computePacketRate(mapTimeCRRs, n_cr, metadata.packetRate)
+			if err != nil {
+				return fmt.Errorf("compute new packetRate: %w", err)
+			}
+			metadata.packetRate = newPacketRate
 		}
-		metadata.packetRate = newPacketRate
 	} else {
 		// Exponential backoff
 		metadata.timeout *= 2
