@@ -25,7 +25,7 @@ func createRandomToken() *[32]uint8{
     return (*[32]uint8)(token)
 }
 
-func createTestServerAndClient(t *testing.T) (*net.UDPConn, *net.UDPConn, *net.UDPAddr){
+func createTestServerAndClient(t *testing.T) (*net.UDPConn, *net.UDPConn, net.Addr){
     conn_server, err := CreateServerSocket("127.0.0.100", 12345)
     if err != nil{
         t.Fatalf(`Creating server failed: %v`, err)
@@ -286,7 +286,7 @@ func TestPacketHeaderTooSmall(t *testing.T){
     data := make([]uint8, 2)
 
     // server header on client side
-	_, err := conn_server.WriteToUDP(data, addr)
+	_, err := conn_server.WriteTo(data, addr)
     if err != nil{
         t.Fatalf(`Error while sending on server: %v`, err)
     }
@@ -327,7 +327,7 @@ func TestWrongPacketType(t *testing.T){
     data[1] = 5
 
     // server header on client side
-	_, err := conn_server.WriteToUDP(data, addr)
+	_, err := conn_server.WriteTo(data, addr)
     if err != nil{
         t.Fatalf(`Error while sending on server: %v`, err)
     }
@@ -371,7 +371,7 @@ func TestUnsupporedVersion(t *testing.T){
     data[0] = 1
 
     // server header on client side
-	_, err := conn_server.WriteToUDP(data, addr)
+	_, err := conn_server.WriteTo(data, addr)
     if err != nil{
         t.Fatalf(`Error while sending on server: %v`, err)
     }
@@ -453,7 +453,7 @@ func TestServerSpecificPacketLength(t *testing.T){
     data[1] = NTM_t
 
 
-	_, err := conn_server.WriteToUDP(data, addr)
+	_, err := conn_server.WriteTo(data, addr)
     if err != nil{
         t.Fatalf(`Error while sending on server: %v`, err)
     }
@@ -469,7 +469,7 @@ func TestServerSpecificPacketLength(t *testing.T){
     }
     data[1] = MDRR_t
 
-	_, err = conn_server.WriteToUDP(data, addr)
+	_, err = conn_server.WriteTo(data, addr)
     if err != nil{
         t.Fatalf(`Error while sending on server: %v`, err)
     }
@@ -484,7 +484,7 @@ func TestServerSpecificPacketLength(t *testing.T){
     }
     data[1] = CRR_t
 
-	_, err = conn_server.WriteToUDP(data, addr)
+	_, err = conn_server.WriteTo(data, addr)
     if err != nil{
         t.Fatalf(`Error while sending on server: %v`, err)
     }
