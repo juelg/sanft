@@ -4,12 +4,14 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
-	"io/ioutil"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
 	"regexp"
+	"sync"
 	"testing"
 	"time"
 
@@ -150,6 +152,26 @@ func startMockServer(quit <-chan bool, conn *net.UDPConn, filename string, chunk
 			}
 		}
 	}
+}
+
+func checkFileContains(file *os.File, data []byte) error {
+	fileData := make([]byte, len(data)+10)
+	n, err := file.ReadAt(fileData, 0)
+	if err != io.EOF {
+		return fmt.Errorf("reading file data: %v", err)
+	}
+
+	if n != len(data) {
+		return fmt.Errorf("file contains %d bytes of data. Expected %d", n, len(data))
+	}
+
+	for i:=0; i<n; i++ {
+		if data[i] != fileData[i] {
+			return fmt.Errorf("file data differs from expected data at position %d. Expected %x got %x", i, data, fileData)
+		}
+	}
+
+	return nil
 }
 
 func FuzzBuildACR(f *testing.F) {
@@ -583,5 +605,151 @@ func TestConnectionMigration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("getMissingChunks failed: %v", err)
 		}
+	}
+
+	err = checkFileContains(metadata.localFile, data)
+	if err != nil {
+		t.Fatalf("received data differs from sent data: %v", err)
+	}
+}
+
+func TestFileIDChange(t *testing.T) {
+	IP := "127.0.0.200"
+	port := 6666
+	URI := "alice"
+	chunkSize := uint16(8)
+	maxChunksInACR := uint16(2)
+	fileID1 := uint32(0x600d1)
+	data1 := []byte("Down, down, down. Would the fall never come to an end? “I wonder how many miles I’ve fallen by this time?” she said aloud. “I must be getting somewhere near the centre of the earth. Let me see: that would be four thousand miles down, I think—” (for, you see, Alice had learnt several things of this sort in her lessons in the schoolroom, and though this was not a very good opportunity for showing off her knowledge, as there was no one to listen to her, still it was good practice to say it over) “—yes, that’s about the right distance—but then I wonder what Latitude or Longitude I’ve got to?” (Alice had no idea what Latitude was, or Longitude either, but thought they were nice grand words to say.)")
+	fileID2 := uint32(0x2bad)
+	data2 := []byte("Presently she began again. “I wonder if I shall fall right through the earth! How funny it’ll seem to come out among the people that walk with their heads downward! The Antipathies, I think—” (she was rather glad there was no one listening, this time, as it didn’t sound at all the right word) “—but I shall have to ask them what the name of the country is, you know. Please, Ma’am, is this New Zealand or Australia?” (and she tried to curtsey as she spoke—fancy curtseying as you’re falling through the air! Do you think you could manage it?) “And what an ignorant little girl she’ll think me for asking! No, it’ll never do to ask: perhaps I shall see it written up somewhere.”")
+	filename := "/tmp/sanftTest.dat"
+	quit := make(chan bool)
+
+    conn_server, err := messages.CreateServerSocket(IP, port)
+    if err != nil{
+        t.Fatalf(`Creating server failed: %v`, err)
+    }
+	defer conn_server.Close()
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		startMockServer(quit, conn_server, URI, chunkSize, maxChunksInACR, fileID1, data1)
+		wg.Done()
+	}()
+
+    conn_client, err := messages.CreateClientSocket(IP, port)
+    if err != nil{
+        t.Fatalf(`Creating client failed: %v`, err)
+    }
+	defer conn_client.Close()
+
+	metadata := new(fileMetadata)
+	metadata.timeout = 3*time.Second
+	metadata.url = URI
+	metadata.packetRate = 10
+
+	err = updateMetadata(conn_client, metadata, &testConfig)
+	if err != nil {
+		t.Fatalf("updateMetadata failed: %v", err)
+	}
+
+	metadata.localFile, err = os.Create(filename)
+	if err != nil {
+		t.Fatalf("Could not open file: %v", err)
+	}
+	defer metadata.localFile.Close()
+
+	err = getMissingChunks(conn_client, metadata, &testConfig)
+	if err != nil {
+		t.Fatalf("getMissingChunks failed: %v", err)
+	}
+
+	// File Change
+	// Quit previous server
+	quit <- true
+	wg.Wait()
+	// Start new server with different file data
+	go startMockServer(quit, conn_server, URI, chunkSize, maxChunksInACR, fileID2, data2)
+
+	for metadata.firstMissing < metadata.fileSize {
+		err = getMissingChunks(conn_client, metadata, &testConfig)
+		if err != nil {
+			t.Fatalf("getMissingChunks failed: %v", err)
+		}
+	}
+
+	err = checkFileContains(metadata.localFile, data2)
+	if err != nil {
+		t.Fatalf("received data differs from sent data: %v", err)
+	}
+}
+
+func TestFileDeleted(t *testing.T) {
+	IP := "127.0.0.200"
+	port := 6666
+	URI := "self-destruct"
+	chunkSize := uint16(8)
+	maxChunksInACR := uint16(2)
+	fileID := uint32(0x2badd00d)
+	data := []byte("This message will self destruct in 5...4...3...2...1...0!")
+	filename := "/tmp/sanftTest.dat"
+	want := regexp.MustCompile(`not found`)
+	quit := make(chan bool)
+
+    conn_server, err := messages.CreateServerSocket(IP, port)
+    if err != nil{
+        t.Fatalf(`Creating server failed: %v`, err)
+    }
+	defer conn_server.Close()
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		startMockServer(quit, conn_server, URI, chunkSize, maxChunksInACR, fileID, data)
+		wg.Done()
+	}()
+
+    conn_client, err := messages.CreateClientSocket(IP, port)
+    if err != nil{
+        t.Fatalf(`Creating client failed: %v`, err)
+    }
+	defer conn_client.Close()
+
+	metadata := new(fileMetadata)
+	metadata.timeout = 3*time.Second
+	metadata.url = URI
+	metadata.packetRate = 10
+
+	err = updateMetadata(conn_client, metadata, &testConfig)
+	if err != nil {
+		t.Fatalf("updateMetadata failed: %v", err)
+	}
+
+	metadata.localFile, err = os.Create(filename)
+	if err != nil {
+		t.Fatalf("Could not open file: %v", err)
+	}
+	defer metadata.localFile.Close()
+
+	err = getMissingChunks(conn_client, metadata, &testConfig)
+	if err != nil {
+		t.Fatalf("getMissingChunks failed: %v", err)
+	}
+
+	// File Deletion
+	// Quit previous server
+	quit <- true
+	wg.Wait()
+	// Start new server with no file under required URI
+	go startMockServer(quit, conn_server, "", chunkSize, maxChunksInACR, 0x0, []byte{})
+
+	err = getMissingChunks(conn_client, metadata, &testConfig)
+	if err == nil {
+		t.Fatalf("Expected error from getMissingChunks. Got nil.")
+	}
+	if !want.MatchString(err.Error()) {
+		t.Fatalf("Expected %v in getMissingChunks error. Got %v.", want, err)
 	}
 }

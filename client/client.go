@@ -78,6 +78,11 @@ const (
 // complete SANFT exchange to request the file identified by URI. If the
 // transfer works, the requested file will be written to localFilename.
 func RequestFile(address string, port int, URI string, localFilename string, conf *ClientConfig) error {
+	var err error
+	err = checkConfig(conf)
+	if err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
 	conn, err := messages.CreateClientSocket(address, port)
 	if err != nil {
 		return fmt.Errorf("create client socket: %w", err)
@@ -100,10 +105,12 @@ func RequestFile(address string, port int, URI string, localFilename string, con
 	}
 	metadata.localFile = localFile
 	// Request chunks
+	fmt.Printf("%s(0x%x): %d/%d chunks (%dchunk/s)\r", metadata.url, metadata.fileID, metadata.nReceived, metadata.fileSize, metadata.packetRate)
 	for metadata.firstMissing < metadata.fileSize {
 		err := getMissingChunks(conn, metadata, conf)
 		if err != nil {
 			localFile.Close()
+			os.Remove(localFilename)
 			return fmt.Errorf("get missing chunks: %w", err)
 		}
 		fmt.Printf("%s(0x%x): %d/%d chunks (%dchunk/s)\r", metadata.url, metadata.fileID, metadata.nReceived, metadata.fileSize, metadata.packetRate)
