@@ -184,7 +184,7 @@ func TestMDR(t *testing.T){
 
 
 func TestACR(t *testing.T){
-	s, err := Init("127.0.0.100", 12345, "./", 20, 10, 0, 0, 0)
+	s, err := Init("127.0.0.100", 12345, "./", 20, 4, 0, 0, 0)
     if err != nil{
         t.Fatalf(`Error creating server: %v`, err)
     }
@@ -264,7 +264,7 @@ func TestACR(t *testing.T){
 	times := make([]time.Time, 3)
 
 	for i := 0; i < 3; i++ {
-		msgr, err = messages.ClientReceive(c, 100000)
+		msgr, err = messages.ClientReceive(c, 10000)
 		times[i] = time.Now()
 
 		if err != nil{
@@ -308,5 +308,191 @@ func TestACR(t *testing.T){
 	// TODO: check possible edge cases / errors:
 	// wrong token, wrong file id, correct file id but modified in between,
 	// too many chunks requested, chunk out of bounds
+
+	// wrong token
+
+	crlist = make([]messages.CR, 1)
+	crlist[0] = messages.CR{ChunkOffset: *messages.Int2uint8_6_arr(0), Length: 1}
+
+	msgacr = messages.GetACR(1, messages.EmptyToken(), fileid, 1, &crlist)
+	msgacr.Send(c)
+
+
+	msgr, err = messages.ClientReceive(c, 10000)
+    if err != nil{
+        t.Fatalf(`Client Receive failed: %v`, err)
+    }
+	parsed, err = messages.ParseServer(&msgr)
+    if err != nil{
+        t.Fatalf(`parse failed: %v`, err)
+    }
+	// should be NTM message
+    ntm = parsed.(messages.NTM)
+	assert.Equal(t, ntm.Header.Number, msgacr.Header.Number, "Header number should match")
+	assert.Equal(t, ntm.Header.Version, messages.VERS, "Returned wrong version")
+	assert.Equal(t, ntm.Header.Error, messages.NoError, "There should be no error type set")
+	assert.Equal(t, ntm.Token, token,  "token should match the previous")
+
+	// wrong file id
+	msgacr = messages.GetACR(1, &token, 0, 1, &crlist)
+	msgacr.Send(c)
+
+	msgr, err = messages.ClientReceive(c, 10000)
+    if err != nil{
+        t.Fatalf(`Client Receive failed: %v`, err)
+    }
+	parsed, err = messages.ParseServer(&msgr)
+    if err != nil{
+        t.Fatalf(`parse failed: %v`, err)
+    }
+	// should be Server header message
+    header := parsed.(messages.ServerHeader)
+
+	assert.Equal(t, header.Number, msgacr.Header.Number, "Header number should match")
+	assert.Equal(t, header.Version, messages.VERS, "Returned wrong version")
+	assert.Equal(t, header.Error, messages.InvalidFileID, "error should be invalid file id")
+
+
+
+	// too many chunks requested in one CR
+	crlist = make([]messages.CR, 1)
+	crlist[0] = messages.CR{ChunkOffset: *messages.Int2uint8_6_arr(0), Length: 5}
+	msgacr = messages.GetACR(1, &token, fileid, 1, &crlist)
+	msgacr.Send(c)
+
+
+	// first 4 messages should work
+	for i := 0; i < 4; i++ {
+		messages.ClientReceive(c, 10000)
+	}
+
+	// 5th should given an error
+	msgr, err = messages.ClientReceive(c, 10000)
+    if err != nil{
+        t.Fatalf(`Client Receive failed: %v`, err)
+    }
+	parsed, err = messages.ParseServer(&msgr)
+    if err != nil{
+        t.Fatalf(`parse failed: %v`, err)
+    }
+	// should be Server header message
+    header = parsed.(messages.ServerHeader)
+
+	assert.Equal(t, header.Number, msgacr.Header.Number, "Header number should match")
+	assert.Equal(t, header.Version, messages.VERS, "Returned wrong version")
+	assert.Equal(t, header.Error, messages.TooManyChunks, "error should be too many chunks")
+
+	// too many chunks requested in single CRs
+	crlist = make([]messages.CR, 5)
+	for i := 0; i < 5; i++ {
+		crlist[i] = messages.CR{ChunkOffset: *messages.Int2uint8_6_arr(uint64(i)), Length: 1}
+	}
+	msgacr = messages.GetACR(1, &token, fileid, 1, &crlist)
+	msgacr.Send(c)
+
+
+	// first 4 messages should work
+	for i := 0; i < 4; i++ {
+		messages.ClientReceive(c, 10000)
+	}
+
+	// 5th should given an error
+	msgr, err = messages.ClientReceive(c, 10000)
+    if err != nil{
+        t.Fatalf(`Client Receive failed: %v`, err)
+    }
+	parsed, err = messages.ParseServer(&msgr)
+    if err != nil{
+        t.Fatalf(`parse failed: %v`, err)
+    }
+	// should be Server header message
+    header = parsed.(messages.ServerHeader)
+
+	assert.Equal(t, header.Number, msgacr.Header.Number, "Header number should match")
+	assert.Equal(t, header.Version, messages.VERS, "Returned wrong version")
+	assert.Equal(t, header.Error, messages.TooManyChunks, "error should be too many chunks")
+
+
+
+	// zero length
+	crlist = make([]messages.CR, 1)
+	crlist[0] = messages.CR{ChunkOffset: *messages.Int2uint8_6_arr(0), Length: 0}
+	msgacr = messages.GetACR(1, &token, fileid, 1, &crlist)
+	msgacr.Send(c)
+
+	msgr, err = messages.ClientReceive(c, 10000)
+    if err != nil{
+        t.Fatalf(`Client Receive failed: %v`, err)
+    }
+	parsed, err = messages.ParseServer(&msgr)
+    if err != nil{
+        t.Fatalf(`parse failed: %v`, err)
+    }
+	// should be Server header message
+    header = parsed.(messages.ServerHeader)
+
+	assert.Equal(t, header.Number, msgacr.Header.Number, "Header number should match")
+	assert.Equal(t, header.Version, messages.VERS, "Returned wrong version")
+	assert.Equal(t, header.Error, messages.ZeroLengthCR, "error should be zero length")
+
+
+	// chunk out of bounds
+	crlist = make([]messages.CR, 1)
+	crlist[0] = messages.CR{ChunkOffset: *messages.Int2uint8_6_arr(100), Length: 1}
+	msgacr = messages.GetACR(1, &token, fileid, 1, &crlist)
+	msgacr.Send(c)
+
+	msgr, err = messages.ClientReceive(c, 10000)
+    if err != nil{
+        t.Fatalf(`Client Receive failed: %v`, err)
+    }
+
+	// fails as chunkoutofbounds means that crs are somehow included
+	parsed, err = messages.ParseServer(&msgr)
+    if err != nil{
+        t.Fatalf(`parse failed: %v`, err)
+    }
+	// should be Server header message
+    crr := parsed.(messages.CRR)
+
+	assert.Equal(t, crr.Header.Number, msgacr.Header.Number, "Header number should match")
+	assert.Equal(t, crr.Header.Version, messages.VERS, "Returned wrong version")
+	assert.Equal(t, crr.Header.Error, messages.ChunkOutOfBounds, "error should be too many chunks")
+	cn := messages.Int2uint8_6_arr(100)
+	assert.Equal(t, crr.ChunkNumber, *cn, "chunk number should be")
+	assert.Equal(t, string(crr.Data), "", "chunk number should be")
+
+
+
+	// correct file id but file modified
+	// modify file
+	dat, _ := os.ReadFile("test.txt")
+	f, _ := os.Create("test.txt")
+	f.Write(dat)
+	f.Close()
+
+	// fileid should still exist in server
+	_, ok := s.FileIDMap[fileid]
+	assert.True(t, ok, "file id should still be in server map")
+
+	msgacr = messages.GetACR(1, &token, fileid, 1, &crlist)
+	msgacr.Send(c)
+
+	msgr, err = messages.ClientReceive(c, 10000)
+    if err != nil{
+        t.Fatalf(`Client Receive failed: %v`, err)
+    }
+	parsed, err = messages.ParseServer(&msgr)
+    if err != nil{
+        t.Fatalf(`parse failed: %v`, err)
+    }
+	// should be Server header message
+    header = parsed.(messages.ServerHeader)
+	assert.Equal(t, header.Number, msgacr.Header.Number, "Header number should match")
+	assert.Equal(t, header.Version, messages.VERS, "Returned wrong version")
+	assert.Equal(t, header.Error, messages.InvalidFileID, "error should be invalid file id")
+
+	_, ok = s.FileIDMap[fileid]
+	assert.False(t, ok, "file id should now be deleted from server map")
 
 }

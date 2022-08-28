@@ -278,40 +278,46 @@ func (s *Server) handleACR(msg messages.ACR, addr *net.UDPAddr){
 		return
 	}
 	// check amount of chunks
-	amount_chunks := 0
-	zero_length := false
-	var highest_requested_chunk uint64
-	for _, i := range msg.CRs{
-		amount_chunks += int(i.Length)
-		zero_length = zero_length || (i.Length == 0)
-		highest_requested_chunk = Max(highest_requested_chunk, messages.Uint8_6_arr2Int(i.ChunkOffset) + uint64(i.Length))
-	}
-	if amount_chunks > int(s.MaxChunksInACR){
-		// too many chunks requested
-		msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
-							Number: msg.Header.Number, Error: messages.TooManyChunks}
-		msg.Send(s.Conn, addr)
-		return
-	}
-	// check if chunk out of bounds
-	if highest_requested_chunk*uint64(s.ChunkSize) > uint64(file.Size()){
-		// chunks out of bounds
-		msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
-							Number: msg.Header.Number, Error: messages.ChunkOutOfBounds}
-		msg.Send(s.Conn, addr)
-		return
-	}
-	// check if zero legnth chunk exists
-	if zero_length {
-		// at least one CR with zero length
-		msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
-							Number: msg.Header.Number, Error: messages.ZeroLengthCR}
-		msg.Send(s.Conn, addr)
-		return
-	}
+	// amount_chunks := 0
+	// zero_length := false
+	// var highest_requested_chunk uint64
+	// for _, i := range msg.CRs{
+	// 	amount_chunks += int(i.Length)
+	// 	zero_length = zero_length || (i.Length == 0)
+	// 	highest_requested_chunk = Max(highest_requested_chunk, messages.Uint8_6_arr2Int(i.ChunkOffset) + uint64(i.Length))
+	// }
+
+	// // TODO: should the server start answering if there are too many requests
+	// if amount_chunks > int(s.MaxChunksInACR){
+	// 	// too many chunks requested
+	// 	msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
+	// 						Number: msg.Header.Number, Error: messages.TooManyChunks}
+	// 	msg.Send(s.Conn, addr)
+	// 	return
+	// }
+
+	// // TODO: these errors should be per chunk request
+	// // check if chunk out of bounds
+	// if highest_requested_chunk*uint64(s.ChunkSize) > uint64(file.Size()){
+	// 	// chunks out of bounds
+	// 	msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
+	// 						Number: msg.Header.Number, Error: messages.ChunkOutOfBounds}
+	// 	msg.Send(s.Conn, addr)
+	// 	return
+	// }
+	// // check if zero legnth chunk exists
+	// if zero_length {
+	// 	// at least one CR with zero length
+	// 	msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
+	// 						Number: msg.Header.Number, Error: messages.ZeroLengthCR}
+	// 	msg.Send(s.Conn, addr)
+	// 	return
+	// }
 
 	// wait with specify rate: 1/rate
 	delta_t := 1.0/float64(msg.PacketRate + s.RateIncrease) * float64(time.Second)
+
+	amount_chunks := 0
 
 	f, err := os.Open(filem.Path)
 	if err != nil {
@@ -323,9 +329,70 @@ func (s *Server) handleACR(msg messages.ACR, addr *net.UDPAddr){
 	// open chunk after each other and send with given rate + add some constant (todo: define constant in server struct)
 	for _, i := range msg.CRs{
 		offset := messages.Uint8_6_arr2Int(i.ChunkOffset)
+
+		// // check too many chunks because of stupid lowest applicability
+		// if amount_chunks >= int(s.MaxChunksInACR){
+		// 	msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
+		// 						Number: msg.Header.Number, Error: messages.TooManyChunks}
+		// 	msg.Send(s.Conn, addr)
+		// 	return
+		// }
+
+
+		// // check chunk out of bounds
+		// if offset*uint64(s.ChunkSize) > uint64(file.Size()){
+		// 	// msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
+		// 	// 					Number: msg.Header.Number, Error: messages.ChunkOutOfBounds}
+		// 	msg := messages.GetCRR(msg.Header.Number, messages.ChunkOutOfBounds, *messages.Int2uint8_6_arr(chunk_number), &buf)
+			
+		// 	msg.Send(s.Conn, addr)
+		// 	continue
+		// }
+
+		// // check zero length
+		// if i.Length == 0 {
+		// 	msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
+		// 						Number: msg.Header.Number, Error: messages.ZeroLengthCR}
+		// 	msg.Send(s.Conn, addr)
+		// 	continue
+		// }
 		f.Seek(int64(offset*uint64(s.ChunkSize)), 0)
-		for j := 0; j < int(i.Length); j++ {
+
+		// for stupid "zero length has the last priority reasons":
+		var l int
+		if i.Length == 0{
+			l = 1
+		} else {
+			l = int(i.Length)
+		}
+
+		for j := 0; j < l; j++ {
 			chunk_number := offset + uint64(j)
+			amount_chunks++
+			// check too many chunks
+			if amount_chunks > int(s.MaxChunksInACR){
+				msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
+									Number: msg.Header.Number, Error: messages.TooManyChunks}
+				msg.Send(s.Conn, addr)
+				return
+			}
+
+			// check chunk out of bounds
+			if (offset+uint64(j))*uint64(s.ChunkSize) > uint64(file.Size()){
+				zero_data := make([]uint8, 0)
+				msg := messages.GetCRR(msg.Header.Number, messages.ChunkOutOfBounds, *messages.Int2uint8_6_arr(chunk_number), &zero_data)
+				msg.Send(s.Conn, addr)
+				break
+			}
+
+			// check zero length
+			if i.Length == 0 {
+				msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
+									Number: msg.Header.Number, Error: messages.ZeroLengthCR}
+				msg.Send(s.Conn, addr)
+				break
+			}
+
 			// read up to chunk size bytes
 			buf := make([]uint8, s.ChunkSize)
     		_, err := f.Read(buf)
@@ -336,9 +403,6 @@ func (s *Server) handleACR(msg messages.ACR, addr *net.UDPAddr){
 			// send the read bytes
 			msg := messages.GetCRR(msg.Header.Number, messages.NoError, *messages.Int2uint8_6_arr(chunk_number), &buf)
 			msg.Send(s.Conn, addr)
-
-			// for the potential next chunk -> No: reading should already move the cursor
-			// f.Seek(int64(s.ChunkSize), 1)
 
 
 			time.Sleep(time.Duration(delta_t))
