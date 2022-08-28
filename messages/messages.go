@@ -41,6 +41,18 @@ func Int2uint8_6_arr(a uint64) *[6]uint8 {
     return (*[6]uint8)(b[:6])
 }
 
+func Uint8_6_arr2Int(d [6]uint8) uint64 {
+	b := make([]uint8, 8)
+	copy(b[:6], d[:])
+	return binary.LittleEndian.Uint64(b)
+}
+
+func EmptyToken() *[32]uint8 {
+    token := new([32]uint8)
+	// re := make([]uint8, 32)
+	return token
+}
+
 
 type ServerMessage interface {
 	Send(conn *net.UDPConn, addr *net.UDPAddr) error

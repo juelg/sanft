@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// func createStaticToken() *[256]uint8{
-//     token := new([256]uint8)
+// func createStaticToken() *[32]uint8{
+//     token := new([32]uint8)
 //     for idx := range token{
 //         token[idx] = uint8(idx)
 //     }
@@ -44,7 +44,7 @@ func createTestServerAndClient(t *testing.T) (*net.UDPConn, *net.UDPConn, *net.U
     if err != nil{
         t.Fatalf(`Error while sending message to server: %v`, err)
     }
-    addr, data, err := ServerReceive(conn_server)
+    addr, data, err := ServerReceive(conn_server, 10000)
     if err != nil{
         t.Fatalf(`Error while receiving on server: %v`, err)
     }
@@ -187,7 +187,7 @@ func TestACR(t *testing.T){
     if err != nil{
         t.Fatalf(`Error while sending message to server: %v`, err)
     }
-    _, data, err := ServerReceive(conn_server)
+    _, data, err := ServerReceive(conn_server, 10000)
     if err != nil{
         t.Fatalf(`Error while receiving on server: %v`, err)
     }
@@ -261,6 +261,19 @@ func TestTimeout(t *testing.T){
     if err == nil{
         t.Fatalf(`This receive should actually time out!`)
     }
+
+    _, _, err = ServerReceive(conn_server, 10)
+
+    if !os.IsTimeout(err){
+        t.Fatalf(`This receive should actually time out: %v`, err)
+    }
+    if err, ok := err.(net.Error); !ok || !err.Timeout() {
+        // this for does the same as above
+        t.Fatalf(`This receive should actually time out: %v`, err)
+    }
+    if err == nil{
+        t.Fatalf(`This receive should actually time out!`)
+    }
 }
 
 // test invalid requests which should lead to parsing errors
@@ -293,7 +306,7 @@ func TestPacketHeaderTooSmall(t *testing.T){
     if err != nil{
         t.Fatalf(`Error while sending on client: %v`, err)
     }
-    _, datar, err = ServerReceive(conn_server)
+    _, datar, err = ServerReceive(conn_server, 10000)
     if err != nil{
         t.Fatalf(`Error while receiving on client: %v`, err)
     }
@@ -337,7 +350,7 @@ func TestWrongPacketType(t *testing.T){
     if err != nil{
         t.Fatalf(`Error while sending on client: %v`, err)
     }
-    _, datar, err = ServerReceive(conn_server)
+    _, datar, err = ServerReceive(conn_server, 10000)
     if err != nil{
         t.Fatalf(`Error while receiving on client: %v`, err)
     }
@@ -381,7 +394,7 @@ func TestUnsupporedVersion(t *testing.T){
     if err != nil{
         t.Fatalf(`Error while sending on client: %v`, err)
     }
-    _, datar, err = ServerReceive(conn_server)
+    _, datar, err = ServerReceive(conn_server, 10000)
     if err != nil{
         t.Fatalf(`Error while receiving on client: %v`, err)
     }
@@ -405,7 +418,7 @@ func TestClientSpecificPacketLength(t *testing.T){
     if err != nil{
         t.Fatalf(`Error while sending on client: %v`, err)
     }
-    _, datar, err := ServerReceive(conn_server)
+    _, datar, err := ServerReceive(conn_server, 10000)
     if err != nil{
         t.Fatalf(`Error while receiving on server: %v`, err)
     }
@@ -421,7 +434,7 @@ func TestClientSpecificPacketLength(t *testing.T){
     if err != nil{
         t.Fatalf(`Error while sending on client: %v`, err)
     }
-    _, datar, err = ServerReceive(conn_server)
+    _, datar, err = ServerReceive(conn_server, 10000)
     if err != nil{
         t.Fatalf(`Error while receiving on server: %v`, err)
     }

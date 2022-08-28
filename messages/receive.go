@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"net"
 	"time"
 )
@@ -32,12 +31,19 @@ func (e *WrongPacketLengthError) Error() string {
 }
 
 
-func ServerReceive(conn *net.UDPConn) (*net.UDPAddr, []byte, error) {
+// timeout in milli seconds
+func ServerReceive(conn *net.UDPConn, timeout int64) (*net.UDPAddr, []byte, error) {
 	buffer := make([]byte, (2<<16)-1)
+
+	deadline := time.Now().Add(time.Duration(timeout) * time.Millisecond)
+	err := conn.SetReadDeadline(deadline)
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating the timeout deadline: %w", err)
+	}
 
 	n, raddr, err := conn.ReadFromUDP(buffer)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error receiving message: %w", err)
+		return nil, nil, err
 	}
 	// TODO: is this bad because is copies memory around?
 	return raddr, buffer[:n], nil
@@ -47,7 +53,7 @@ func ServerReceive(conn *net.UDPConn) (*net.UDPAddr, []byte, error) {
 func ClientReceive(conn *net.UDPConn, timeout int64) ([]byte, error) {
 	buffer := make([]byte, (2<<16)-1)
 
-	deadline := time.Now().Add(time.Duration(timeout * int64(math.Pow10(6))))
+	deadline := time.Now().Add(time.Duration(timeout) * time.Millisecond)
 	err := conn.SetReadDeadline(deadline)
 	if err != nil {
 		return nil, fmt.Errorf("creating the timeout deadline: %w", err)
