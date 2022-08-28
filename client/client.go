@@ -274,7 +274,7 @@ func getMetadataFromMDRR(metadata *fileMetadata, mdrr *messages.MDRR) error{
 	metadata.chunkSize = mdrr.ChunkSize
 	metadata.maxChunksInACR = mdrr.MaxChunksInACR
 	metadata.fileID = mdrr.FileID
-	metadata.fileSize = messages.Uint8_6_arr2int(&mdrr.FileSize)
+	metadata.fileSize = messages.Uint8_6_arr2Int(mdrr.FileSize)
 	metadata.checksum = mdrr.Checksum
 
 	// Perform some sanity checks on the metadata
@@ -398,7 +398,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, conf *ClientCon
 				conf.DebugLogger.Printf("Received response with wrong message number(%d instead of %d). Dropped\n", crr.Header.Number, acr.Header.Number)
 				continue
 			}
-			chunkNumber := messages.Uint8_6_arr2int(&crr.ChunkNumber)
+			chunkNumber := messages.Uint8_6_arr2Int(crr.ChunkNumber)
 			// Let's find its position in the ACR
 			chunkIndexInACR := -1
 			for i, cn := range requested {

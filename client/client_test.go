@@ -45,8 +45,7 @@ func startMockServer(quit <-chan bool, conn *net.UDPConn, filename string, chunk
 		case <- quit:
 			return
 		default:
-			conn.SetReadDeadline(time.Now().Add(500*time.Millisecond))
-			addr, data, err := messages.ServerReceive(conn)
+			addr, data, err := messages.ServerReceive(conn, 500)
 			if err != nil{
 				if os.IsTimeout(errors.Unwrap(err)) {
 					continue
@@ -115,7 +114,7 @@ func startMockServer(quit <-chan bool, conn *net.UDPConn, filename string, chunk
 				packetRate := acr.PacketRate + uint32(packetRateAddC)
 				tNext := time.Now()
 				for _,cr := range acr.CRs {
-					offset := messages.Uint8_6_arr2int(&cr.ChunkOffset)
+					offset := messages.Uint8_6_arr2Int(cr.ChunkOffset)
 					for i:=offset; i < offset+uint64(cr.Length); i++ {
 						n_cr ++
 						if n_cr > int(maxChunksInACR) {
@@ -219,7 +218,7 @@ func checkValidACR(acr *messages.ACR, requested []uint64, metadata *fileMetadata
 
 	// Check that the ACR is valid
 	for _, cr := range acr.CRs {
-		offset := messages.Uint8_6_arr2int(&cr.ChunkOffset)
+		offset := messages.Uint8_6_arr2Int(cr.ChunkOffset)
 		length := cr.Length
 		if length == 0 {
 			return fmt.Errorf("Invalid length (0) for chunk request in %v", acr)

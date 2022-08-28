@@ -7,6 +7,8 @@ import (
 	"net"
 )
 
+// TODO, big endian and check for packed
+
 func (m ServerHeader) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, binary.BigEndian, m)
@@ -22,7 +24,6 @@ func (m ServerHeader) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
 
 func (m NTM) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
 	buf := new(bytes.Buffer)
-	// TODO: we want to send big endian, right?
 	err := binary.Write(buf, binary.BigEndian, m)
 	if err != nil {
 		return fmt.Errorf("error encoding message: %w", err)
