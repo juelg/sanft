@@ -9,14 +9,16 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"os"
 	"time"
+
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 )
 
 type FileM struct{
-	URI string
+	Path string
 	T time.Time
 	Try int
 	// cache checksum to avoid calculating it again if the file has not been modified
@@ -36,6 +38,9 @@ type Server struct {
 
 	// keying material
 	key []uint8
+
+	// constant packet rate increase
+	RateIncrease uint32
 }
 
 
@@ -55,7 +60,7 @@ func createRandomKey() []uint8{
 
 // The values should be sanity checked before putting into this function
 // valid ip and port, markov p and q between 0 and 1, root_dir exists
-func Init(ip string, port int, root_dir string, chunk_size uint16, max_chunks_in_acr uint16, markovP float32, markovQ float32) (*Server, error){
+func Init(ip string, port int, root_dir string, chunk_size uint16, max_chunks_in_acr uint16, markovP float32, markovQ float32, rate_increase uint32) (*Server, error){
     conn, err := messages.CreateServerSocket(ip, port)
     if err != nil{
 		return nil, fmt.Errorf("error while creating the socket: %w", err)
@@ -85,6 +90,7 @@ func Init(ip string, port int, root_dir string, chunk_size uint16, max_chunks_in
 	s.FileIDMap = make(map[uint32]FileM)
 
 	s.NewKey()
+	s.RateIncrease = rate_increase
 
 	return s, nil
 }
@@ -94,17 +100,28 @@ func (s *Server) NewKey() {
 }
 
 // server methods
-func (s *Server) Listen() error {
+
+
+
+// the only purpose of the channel is to tell the function
+// when to stop listening
+func (s *Server) Listen(close chan bool) error {
 	// TODO: listen until channel says stop?
 	// TODO this shouldnt return an error but instead just log
-	for {
-		addr, data, err := messages.ServerReceive(s.Conn)
+
+	for cont(close) {
+		// short timeout to be responsive
+		addr, data, err := messages.ServerReceive(s.Conn, 100)
+    	if os.IsTimeout(err){
+			// next iteration when timeout
+			continue
+		}
 		if err != nil{
 			return fmt.Errorf("error while receiving form UDP socket: %w", err)
 		}
 		msgr, err := messages.ParseClient(&data)
-		// TODO check for parsing specific errors
 
+		// check for parsing specific errors
     	var e1 *messages.WrongPacketLengthError
     	var e2 *messages.UnsupporedTypeError
     	var e3 *messages.UnsupporedVersionError
@@ -134,11 +151,13 @@ func (s *Server) Listen() error {
 		}
 
 	}
+	return nil
 }
 
 func (s *Server) GetPath(path string) string{
 	// re := s.RootDir + path
 	// return strings.Replace(re, "//", "/", 1)
+	// TODO: path should start with /
 	return s.RootDir + path
 }
 
@@ -169,7 +188,8 @@ func (s *Server) handleMDR(msg messages.MDR, addr *net.UDPAddr){
 
 	// filesize
 	filesize := file.Size()
-	filesize_in_chunks := filesize / int64(s.ChunkSize)
+	// round up
+	filesize_in_chunks := Ceil(filesize, int64(s.ChunkSize))
 	if filesize_in_chunks > (2<<48)-1{
 		// file too large, cant serve -> return file not found: Implementation specific
 		msg := messages.ServerHeader{Version: messages.VERS, Type: messages.MDRR_t,
@@ -188,8 +208,6 @@ func (s *Server) handleMDR(msg messages.MDR, addr *net.UDPAddr){
 			s.FileIDMap = make(map[uint32]FileM)
 			// run loop one more time, now we should find a valid id
 			continue
-
-
 		}
 		// lookup last modified
 		lastChanged := file.ModTime()
@@ -203,7 +221,7 @@ func (s *Server) handleMDR(msg messages.MDR, addr *net.UDPAddr){
 
 		filem, ok := s.FileIDMap[fileid]
 		if ok {
-			if filem.URI == msg.URI && filem.T == lastChanged {
+			if filem.Path == msg.URI && filem.T == lastChanged {
 				// same file: use this file id
 				checksum = filem.Checksum
 				break
@@ -218,7 +236,7 @@ func (s *Server) handleMDR(msg messages.MDR, addr *net.UDPAddr){
 				log.Printf("error while getting file checksum: %v\n", err)
 				return
 			}
-			s.FileIDMap[fileid] = FileM{URI: msg.URI, T: lastChanged, Try: i, Checksum: checksum}
+			s.FileIDMap[fileid] = FileM{Path: filepath, T: lastChanged, Try: i, Checksum: checksum}
 			break
 		}
 
@@ -229,6 +247,164 @@ func (s *Server) handleMDR(msg messages.MDR, addr *net.UDPAddr){
 		log.Printf("error while sending: %v\n",  err)
 	}
 
+}
+
+
+func (s *Server) handleACR(msg messages.ACR, addr *net.UDPAddr){
+	// - ACR: check token, check file id in dict (what happens if mdr hasnt been send before?), read file chunk and return
+	if !s.checkToken(addr, &msg.Header.Token){
+		s.sendNTM(msg.Header.Number, messages.NoError, addr)
+		return
+	}
+	// check if file id in dict otherwise invalid file id
+	filem, ok := s.FileIDMap[msg.FileID]
+	if !ok {
+		// fileid does not exist (yet)
+		msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
+							Number: msg.Header.Number, Error: messages.InvalidFileID}
+		msg.Send(s.Conn, addr)
+		return
+	}
+	// check file exists with the save timestamp
+	file, err := os.Stat(filem.Path)
+	if errors.Is(err, os.ErrNotExist) || file.ModTime() != filem.T {
+		// file does no longer exist or has been modified
+		// delete from dict
+		delete(s.FileIDMap, msg.FileID)
+		// send error message
+		msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
+							Number: msg.Header.Number, Error: messages.InvalidFileID}
+		msg.Send(s.Conn, addr)
+		return
+	}
+	// check amount of chunks
+	amount_chunks := 0
+	zero_length := false
+	var highest_requested_chunk uint64
+	for _, i := range msg.CRs{
+		amount_chunks += int(i.Length)
+		zero_length = zero_length || (i.Length == 0)
+		highest_requested_chunk = Max(highest_requested_chunk, messages.Uint8_6_arr2Int(i.ChunkOffset) + uint64(i.Length))
+	}
+	if amount_chunks > int(s.MaxChunksInACR){
+		// too many chunks requested
+		msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
+							Number: msg.Header.Number, Error: messages.TooManyChunks}
+		msg.Send(s.Conn, addr)
+		return
+	}
+	// check if chunk out of bounds
+	if highest_requested_chunk*uint64(s.ChunkSize) > uint64(file.Size()){
+		// chunks out of bounds
+		msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
+							Number: msg.Header.Number, Error: messages.ChunkOutOfBounds}
+		msg.Send(s.Conn, addr)
+		return
+	}
+	// check if zero legnth chunk exists
+	if zero_length {
+		// at least one CR with zero length
+		msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
+							Number: msg.Header.Number, Error: messages.ZeroLengthCR}
+		msg.Send(s.Conn, addr)
+		return
+	}
+
+	// wait with specify rate: 1/rate
+	delta_t := 1.0/float64(msg.PacketRate + s.RateIncrease) * float64(time.Second)
+
+	f, err := os.Open(filem.Path)
+	if err != nil {
+		log.Printf("error while opening file: %v\n", err)
+		return
+	}
+   	defer f.Close()
+
+	// open chunk after each other and send with given rate + add some constant (todo: define constant in server struct)
+	for _, i := range msg.CRs{
+		offset := messages.Uint8_6_arr2Int(i.ChunkOffset)
+		f.Seek(int64(offset*uint64(s.ChunkSize)), 0)
+		for j := 0; j < int(i.Length); j++ {
+			chunk_number := offset + uint64(j)
+			// read up to chunk size bytes
+			buf := make([]uint8, s.ChunkSize)
+    		_, err := f.Read(buf)
+			if err != nil {
+				log.Printf("error while reading from the file: %v\n", err)
+				continue
+			}
+			// send the read bytes
+			msg := messages.GetCRR(msg.Header.Number, messages.NoError, *messages.Int2uint8_6_arr(chunk_number), &buf)
+			msg.Send(s.Conn, addr)
+
+			// for the potential next chunk -> No: reading should already move the cursor
+			// f.Seek(int64(s.ChunkSize), 1)
+
+
+			time.Sleep(time.Duration(delta_t))
+
+		}
+
+	}
+
+}
+
+func (s *Server) sendNTM(number uint8, err uint8, addr *net.UDPAddr){
+	token := s.createToken(addr)
+	ntm := messages.GetNTM(number, err, &token)
+	ntm.Send(s.Conn, addr)
+}
+
+
+func (s *Server) createToken(addr *net.UDPAddr) [32]uint8 {
+	ip_port_bytes := getPortIPBytes(addr)
+
+	data := make([]byte, len(ip_port_bytes) + len(s.key))
+	copy(data[:len(ip_port_bytes)], ip_port_bytes)
+	copy(data[len(ip_port_bytes):], s.key)
+	return sha256.Sum256(data)
+}
+
+func (s *Server) checkToken(addr *net.UDPAddr, Token *[32]uint8) bool{
+	return s.createToken(addr) == *Token
+}
+
+func (s *Server) StopListening(cl chan bool){
+	cl<-false
+}
+
+// false if something is send to the close channel, else otherwise
+// whether to continue the loop in the Listen method
+func cont(cl chan bool) bool{
+	select {
+		case <-cl:
+			return false
+		default:
+			return true
+	}
+}
+
+
+// returns IP + Port bytes slice
+func getPortIPBytes(addr *net.UDPAddr) []byte{
+	ip_bytes := []byte(addr.IP)
+	port_bytes := make([]byte, 2)
+	binary.LittleEndian.PutUint16(port_bytes, uint16(addr.Port))
+	return append(ip_bytes, port_bytes...)
+}
+
+
+func Max(x, y uint64) uint64 {
+    if x < y {
+        return y
+    }
+    return x
+}
+
+
+
+func Ceil(a, b int64) int64{
+	return int64(math.Ceil(float64(a) / float64(b)))
 }
 
 func GetFileChecksum(filepath string) (*[32]uint8, error) {
@@ -263,46 +439,3 @@ func GetFileID(path string, t time.Time, try int) (uint32, error){
 
 	return binary.LittleEndian.Uint32(longid[:4]), nil
 }
-
-func (s *Server) handleACR(msg messages.ACR, addr *net.UDPAddr){
-	// - ACR: check token, check file id in dict (what happens if mdr hasnt been send before?), read file chunk and return
-	if !s.checkToken(addr, &msg.Header.Token){
-		s.sendNTM(msg.Header.Number, messages.NoError, addr)
-		return
-	}
-	// check if file id in dict otherwise invalid file id
-
-}
-
-func (s *Server) sendNTM(number uint8, err uint8, addr *net.UDPAddr){
-	token := s.createToken(addr)
-	ntm := messages.GetNTM(number, err, &token)
-	ntm.Send(s.Conn, addr)
-}
-
-
-func (s *Server) createToken(addr *net.UDPAddr) [32]uint8 {
-	ip_port_bytes := getPortIPBytes(addr)
-
-	data := make([]byte, len(ip_port_bytes) + len(s.key))
-	copy(data[:len(ip_port_bytes)], ip_port_bytes)
-	copy(data[len(ip_port_bytes):], s.key)
-	return sha256.Sum256(data)
-}
-
-func (s *Server) checkToken(addr *net.UDPAddr, Token *[32]uint8) bool{
-	return s.createToken(addr) == *Token
-}
-
-// returns IP + Port bytes slice
-func getPortIPBytes(addr *net.UDPAddr) []byte{
-	ip_bytes := []byte(addr.IP)
-	port_bytes := make([]byte, 2)
-	binary.LittleEndian.PutUint16(port_bytes, uint16(addr.Port))
-	return append(ip_bytes, port_bytes...)
-}
-
-
-
-
-
