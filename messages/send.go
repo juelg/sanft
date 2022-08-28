@@ -9,33 +9,33 @@ import (
 
 // TODO, big endian and check for packed
 
-func (m ServerHeader) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
+func (m ServerHeader) Send(conn net.PacketConn, addr net.Addr) error {
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, binary.BigEndian, m)
 	if err != nil {
 		return fmt.Errorf("error encoding message: %w", err)
 	}
-	_, err = conn.WriteToUDP(buf.Bytes(), addr)
+	_, err = conn.WriteTo(buf.Bytes(), addr)
 	if err != nil {
 		return fmt.Errorf("error sending message: %w", err)
 	}
 	return nil
 }
 
-func (m NTM) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
+func (m NTM) Send(conn net.PacketConn, addr net.Addr) error {
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, binary.BigEndian, m)
 	if err != nil {
 		return fmt.Errorf("error encoding message: %w", err)
 	}
-	_, err = conn.WriteToUDP(buf.Bytes(), addr)
+	_, err = conn.WriteTo(buf.Bytes(), addr)
 	if err != nil {
 		return fmt.Errorf("error sending message: %w", err)
 	}
 	return nil
 }
 
-func (m MDR) Send(conn *net.UDPConn) error {
+func (m MDR) Send(conn net.Conn) error {
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, binary.BigEndian, m.Header)
 	if err != nil {
@@ -53,20 +53,20 @@ func (m MDR) Send(conn *net.UDPConn) error {
 	return nil
 }
 
-func (m MDRR) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
+func (m MDRR) Send(conn net.PacketConn, addr net.Addr) error {
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, binary.BigEndian, m)
 	if err != nil {
 		return fmt.Errorf("error encoding message: %w", err)
 	}
-	_, err = conn.WriteToUDP(buf.Bytes(), addr)
+	_, err = conn.WriteTo(buf.Bytes(), addr)
 	if err != nil {
 		return fmt.Errorf("error sending message: %w", err)
 	}
 	return nil
 }
 
-func (m ACR) Send(conn *net.UDPConn) error {
+func (m ACR) Send(conn net.Conn) error {
 	buf := new(bytes.Buffer)
 	/* Once again, we must encode things manually and not all at once */
 	/* encode header */
@@ -97,7 +97,7 @@ func (m ACR) Send(conn *net.UDPConn) error {
 	return nil
 }
 
-func (m CRR) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
+func (m CRR) Send(conn net.PacketConn, addr net.Addr) error {
 	buf := new(bytes.Buffer)
 	/* encode header */
 	err := binary.Write(buf, binary.BigEndian, m.Header)
@@ -115,7 +115,7 @@ func (m CRR) Send(conn *net.UDPConn, addr *net.UDPAddr) error {
 		return fmt.Errorf("error encoding message: %w", err)
 	}
 	/* …and send it… */
-	_, err = conn.WriteToUDP(buf.Bytes(), addr)
+	_, err = conn.WriteTo(buf.Bytes(), addr)
 	if err != nil {
 		return fmt.Errorf("error sending message: %w", err)
 	}
