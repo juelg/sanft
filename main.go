@@ -50,6 +50,10 @@ func main() {
 		if folder[len(folder)-1] != '/'{
 			folder = folder + "/"
 		}
+		if *chunkSize > 65517 {
+			fmt.Println("error: Chunk Size must not be larger than 65517")
+			os.Exit(1)
+		}
 
 		log.Println("Starting server")
 
