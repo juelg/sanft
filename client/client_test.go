@@ -52,10 +52,7 @@ func startMockServer(quit <-chan bool, conn *net.UDPConn, filename string, chunk
 				}
 				continue
 			}
-			addrData, err := addr.AddrPort().MarshalBinary()
-			if err != nil {
-				fmt.Printf("Mock server: can't compute token: %v\n", err)
-			}
+			addrData := []byte(addr.String())
 			h := sha256.New()
 			_, err = h.Write(addrData)
 			if err != nil {
