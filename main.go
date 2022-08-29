@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path"
 
+	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/client"
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/server"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
@@ -15,11 +17,11 @@ var (
 	port           = kingpin.Flag("port", "Specify the port number to use (use 1337 as default if not given).").Default("1337").Short('t').Int()
 	markovP        = kingpin.Flag("p", "Specify the loss probabilities for the Markov chain model.").Short('p').Default("0").Float64()
 	markovQ        = kingpin.Flag("q", "Specify the loss probabilities for the Markov chain model.").Short('q').Default("0").Float64()
-	fileDir        = kingpin.Flag("file-dir", "Specify the directory containing the files that the server should serve.").Short('d').Default("./").ExistingDir()
+	fileDir        = kingpin.Flag("file-dir", "Server: Specify the directory containing the files that the server should serve. Client: Specify the directory where the requested files will be saved").Short('d').Default("./").ExistingDir()
 	chunkSize      = kingpin.Flag("chunk-size", "The chunk size advertised and used by the server.").Default("4048").Int()
 	maxChunksInACR = kingpin.Flag("max-chunks-in-acr", "The maximum number of chunks in an ACR allowed by the server.").Default("128").Int()
-	files          = kingpin.Flag("files", "The name of the file(s) to fetch.").Default("").Strings()
 	rateIncrease   = kingpin.Flag("rate-increase", "Amount that the server sending rate should be increased in packet per second.").Default("1").Float64()
+	files          = kingpin.Arg("files", "The name of the file(s) to fetch.").Default("").Strings()
 )
 
 func main() {
@@ -36,7 +38,7 @@ func main() {
 	}
 
 
-	fmt.Printf("Host: %s, Server Mode: %b, port: %d, markovP: %d markovQ: %d, file-dir: %s, files: %s\n", *host, *serverMode, *port, *markovP, *markovQ, *fileDir, *files)
+	fmt.Printf("Host: %s, Server Mode: %t, port: %d, markovP: %f markovQ: %f, file-dir: %s, files: %s\n", *host, *serverMode, *port, *markovP, *markovQ, *fileDir, *files)
 	fmt.Println("files: ", *files)
 
 	if *serverMode { /* server mode */
@@ -51,7 +53,7 @@ func main() {
 
 		log.Println("Starting server")
 
-		s, err := server.Init(*host, *port, folder, uint16(*chunkSize), uint16(*maxChunksInACR), 
+		s, err := server.Init(*host, *port, folder, uint16(*chunkSize), uint16(*maxChunksInACR),
 								*markovP, *markovQ, *rateIncrease)
 		if err != nil{
 			log.Panicf(`Error creating server: %v`, err)
@@ -68,7 +70,19 @@ func main() {
 			os.Exit(1)
 		}
 
-		// TODO start client threads
+		clientConfig := client.DefaultConfig
+
+		clientConfig.MarkovP = *markovP
+		clientConfig.MarkovQ = *markovQ
+
+		// Request files sequentially
+		for _,file := range *files {
+			localFileName := path.Join(*fileDir, file)
+			err := client.RequestFile(*host, *port, file, localFileName, &clientConfig)
+			if err != nil {
+				fmt.Printf("File request for %q failed: %v\n", file, err);
+			}
+		}
 	}
 
 }
