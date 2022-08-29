@@ -80,13 +80,13 @@ const (
 // RequestFile connects to the server at address:port and tries to perform a
 // complete SANFT exchange to request the file identified by URI. If the
 // transfer works, the requested file will be written to localFilename.
-func RequestFile(address string, port int, URI string, localFilename string, conf *ClientConfig) error {
+func RequestFile(ip net.IP, port int, URI string, localFilename string, conf *ClientConfig) error {
 	var err error
 	err = checkConfig(conf)
 	if err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
-	conn, err := markov.CreateClientSocket(address, port, conf.MarkovP, conf.MarkovQ)
+	conn, err := markov.CreateClientSocket(ip, port, conf.MarkovP, conf.MarkovQ)
 	if err != nil {
 		return fmt.Errorf("create client socket: %w", err)
 	}

@@ -41,7 +41,7 @@ type Server struct {
 	key []uint8
 
 	// constant packet rate increase
-	RateIncrease uint32
+	RateIncrease float64
 }
 
 
@@ -61,7 +61,7 @@ func createRandomKey() []uint8{
 
 // The values should be sanity checked before putting into this function
 // valid ip and port, markov p and q between 0 and 1, root_dir exists
-func Init(ip string, port int, root_dir string, chunk_size uint16, max_chunks_in_acr uint16, markovP float64, markovQ float64, rate_increase uint32) (*Server, error){
+func Init(ip net.IP, port int, root_dir string, chunk_size uint16, max_chunks_in_acr uint16, markovP float64, markovQ float64, rate_increase float64) (*Server, error){
 	// check if root dir exists
 	if _, err := os.Stat(root_dir); os.IsNotExist(err) {
 		// root_dir does not exist does not exist
@@ -281,7 +281,7 @@ func (s *Server) handleACR(msg messages.ACR, addr net.Addr){
 	}
 
 	// wait with specify rate: 1/rate
-	delta_t := 1.0/float64(msg.PacketRate + s.RateIncrease) * float64(time.Second)
+	delta_t := 1.0/(float64(msg.PacketRate) + s.RateIncrease) * float64(time.Second)
 
 	amount_chunks := 0
 

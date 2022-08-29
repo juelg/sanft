@@ -26,12 +26,12 @@ func createRandomToken() *[32]uint8{
 }
 
 func createTestServerAndClient(t *testing.T) (*net.UDPConn, *net.UDPConn, net.Addr){
-    conn_server, err := CreateServerSocket("127.0.0.100", 12345)
+    conn_server, err := CreateServerSocket(net.ParseIP("127.0.0.100"), 12345)
     if err != nil{
         t.Fatalf(`Creating server failed: %v`, err)
     }
 
-    conn_client, err := CreateClientSocket("127.0.0.100", 12345)
+    conn_client, err := CreateClientSocket(net.ParseIP("127.0.0.100"), 12345)
     if err != nil{
         t.Fatalf(`Creating client failed: %v`, err)
     }

@@ -9,7 +9,7 @@ import (
 
 func TestCreateServerSocket(t *testing.T) {
 	var conn net.PacketConn
-	conn, err := markov.CreateServerSocket("127.0.0.100", 12345, 0.5, 0.6)
+	conn, err := markov.CreateServerSocket(net.ParseIP("127.0.0.100"), 12345, 0.5, 0.6)
 	if err != nil {
 		t.Fatalf("Could not create server socket: %v", err)
 	}
@@ -21,7 +21,7 @@ func TestCreateServerSocket(t *testing.T) {
 
 func TestCreateClientSocket(t *testing.T) {
 	var conn net.Conn
-	conn, err := markov.CreateClientSocket("127.0.0.100", 12345, 0.5, 0.6)
+	conn, err := markov.CreateClientSocket(net.ParseIP("127.0.0.100"), 12345, 0.5, 0.6)
 	if err != nil {
 		t.Fatalf("Could not create client socket: %v", err)
 	}

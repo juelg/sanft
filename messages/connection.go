@@ -7,10 +7,10 @@ import (
 )
 
 
-func CreateServerSocket(ip string, port int) (*net.UDPConn, error){
+func CreateServerSocket(ip net.IP, port int) (*net.UDPConn, error){
 	laddr := net.UDPAddr{
 		Port: port,
-		IP:   net.ParseIP(ip),
+		IP:   ip,
 	}
 	conn, err := net.ListenUDP("udp", &laddr)
 	if err != nil {
@@ -19,10 +19,10 @@ func CreateServerSocket(ip string, port int) (*net.UDPConn, error){
 	return conn, nil
 }
 
-func CreateClientSocket(address string, port int) (*net.UDPConn, error){
-	raddr, err := net.ResolveUDPAddr("udp", address + ":" + fmt.Sprint(port))
-	if err != nil {
-		return nil, fmt.Errorf("error resolving addr: %w", err)
+func CreateClientSocket(ip net.IP, port int) (*net.UDPConn, error){
+	raddr := &net.UDPAddr{
+		Port: port,
+		IP:   ip,
 	}
 
 	// this automatically takes local laddr
