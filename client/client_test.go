@@ -372,7 +372,7 @@ func TestWriteChunkToFile(t *testing.T) {
 }
 
 func TestUpdateMetadata(t *testing.T) {
-	IP := "127.0.0.200"
+	IP := net.ParseIP("127.0.0.200")
 	port := 6666
 	URI := "foo"
 	chunkSize := uint16(8)
@@ -437,7 +437,7 @@ func TestUpdateMetadata(t *testing.T) {
 }
 
 func TestUpdateMetadataNotFound(t *testing.T) {
-	IP := "127.0.0.200"
+	IP := net.ParseIP("127.0.0.200")
 	port := 6666
 	URI := "foo"
 	wrongURI := "notfoo"
@@ -477,7 +477,7 @@ func TestUpdateMetadataNotFound(t *testing.T) {
 }
 
 func TestRequestFile(t *testing.T) {
-	IP := "127.0.0.200"
+	IP := net.ParseIP("127.0.0.200")
 	port := 6666
 	filename := "/tmp/sanftTestRequest.dat"
 	var tests = []struct {
@@ -543,7 +543,7 @@ func TestRequestFile(t *testing.T) {
 }
 
 func TestConnectionMigration(t *testing.T) {
-	IP := "127.0.0.200"
+	IP := net.ParseIP("127.0.0.200")
 	port := 6666
 	URI := "foo"
 	chunkSize := uint16(8)
@@ -610,7 +610,7 @@ func TestConnectionMigration(t *testing.T) {
 }
 
 func TestFileIDChange(t *testing.T) {
-	IP := "127.0.0.200"
+	IP := net.ParseIP("127.0.0.200")
 	port := 6666
 	URI := "alice"
 	chunkSize := uint16(8)
@@ -683,7 +683,7 @@ func TestFileIDChange(t *testing.T) {
 }
 
 func TestFileDeleted(t *testing.T) {
-	IP := "127.0.0.200"
+	IP := net.ParseIP("127.0.0.200")
 	port := 6666
 	URI := "self-destruct"
 	chunkSize := uint16(8)

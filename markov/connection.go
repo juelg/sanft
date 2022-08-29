@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"net"
 )
-func CreateServerSocket(ip string, port int, p float64, q float64) (net.PacketConn, error){
+
+		// IP:   net.ParseIP(ip),
+func CreateServerSocket(ip net.IP, port int, p float64, q float64) (net.PacketConn, error){
 	laddr := net.UDPAddr{
 		Port: port,
-		IP:   net.ParseIP(ip),
+		IP:   ip,
 	}
 	conn, err := net.ListenUDP("udp", &laddr)
 	if err != nil {
@@ -22,10 +24,10 @@ func CreateServerSocket(ip string, port int, p float64, q float64) (net.PacketCo
 	return markovConn, nil
 }
 
-func CreateClientSocket(address string, port int, p float64, q float64) (net.Conn, error){
-	raddr, err := net.ResolveUDPAddr("udp", address + ":" + fmt.Sprint(port))
-	if err != nil {
-		return nil, fmt.Errorf("error resolving addr: %w", err)
+func CreateClientSocket(ip net.IP, port int, p float64, q float64) (net.Conn, error){
+	raddr := &net.UDPAddr{
+		Port: port,
+		IP:   ip,
 	}
 
 	// this automatically takes local laddr

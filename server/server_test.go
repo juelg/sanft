@@ -14,7 +14,7 @@ import (
 
 
 func TestToken(t *testing.T){
-	s, err := Init("127.0.0.1", 10000, "/", 1024, 1, 0, 0, 0)
+	s, err := Init(net.ParseIP("127.0.0.1"), 10000, "/", 1024, 1, 0, 0, 0)
     if err != nil{
         t.Fatalf(`Error creating server: %v`, err)
     }
@@ -40,14 +40,14 @@ func TestToken(t *testing.T){
 
 
 func TestMDR(t *testing.T){
-	s, err := Init("127.0.0.100", 12345, "./", 20, 10, 0, 0, 0)
+	s, err := Init(net.ParseIP("127.0.0.100"), 12345, "./", 20, 10, 0, 0, 0)
     if err != nil{
         t.Fatalf(`Error creating server: %v`, err)
     }
 	defer s.Conn.Close()
 
 
-    c, err := messages.CreateClientSocket("127.0.0.100", 12345)
+    c, err := messages.CreateClientSocket(net.ParseIP("127.0.0.100"), 12345)
     if err != nil{
         t.Fatalf(`Creating client failed: %v`, err)
     }
@@ -184,14 +184,14 @@ func TestMDR(t *testing.T){
 
 
 func TestACR(t *testing.T){
-	s, err := Init("127.0.0.100", 12345, "./", 20, 4, 0, 0, 0)
+	s, err := Init(net.ParseIP("127.0.0.100"), 12345, "./", 20, 4, 0, 0, 0)
     if err != nil{
         t.Fatalf(`Error creating server: %v`, err)
     }
 	defer s.Conn.Close()
 
 
-    c, err := messages.CreateClientSocket("127.0.0.100", 12345)
+    c, err := messages.CreateClientSocket(net.ParseIP("127.0.0.100"), 12345)
     if err != nil{
         t.Fatalf(`Creating client failed: %v`, err)
     }
