@@ -586,7 +586,7 @@ func computePacketRate(timeReceiveCRR map[int]time.Time, n_expected int, packetR
 			return 1, nil
 		}
 	}
-	measuredRate := float64(n_received) / estimatedLast.Sub(estimatedFirst).Abs().Seconds()
+	measuredRate := float64(n_received) / estimatedLast.Sub(estimatedFirst).Seconds()
 	// Do some sanity checks to avoid an overflow
 	if measuredRate > float64(math.MaxUint32) {
 		// It's probably not a good idea to request a packetRate that large but
