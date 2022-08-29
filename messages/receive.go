@@ -32,7 +32,7 @@ func (e *WrongPacketLengthError) Error() string {
 
 
 // timeout in milli seconds
-func ServerReceive(conn *net.UDPConn, timeout int64) (*net.UDPAddr, []byte, error) {
+func ServerReceive(conn net.PacketConn, timeout int64) (net.Addr, []byte, error) {
 	buffer := make([]byte, (2<<16)-1)
 
 	deadline := time.Now().Add(time.Duration(timeout) * time.Millisecond)
@@ -41,7 +41,7 @@ func ServerReceive(conn *net.UDPConn, timeout int64) (*net.UDPAddr, []byte, erro
 		return nil, nil, fmt.Errorf("creating the timeout deadline: %w", err)
 	}
 
-	n, raddr, err := conn.ReadFromUDP(buffer)
+	n, raddr, err := conn.ReadFrom(buffer)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -50,7 +50,7 @@ func ServerReceive(conn *net.UDPConn, timeout int64) (*net.UDPAddr, []byte, erro
 }
 
 // timeout in milli seconds
-func ClientReceive(conn *net.UDPConn, timeout int64) ([]byte, error) {
+func ClientReceive(conn net.PacketConn, timeout int64) ([]byte, error) {
 	buffer := make([]byte, (2<<16)-1)
 
 	deadline := time.Now().Add(time.Duration(timeout) * time.Millisecond)
@@ -59,7 +59,7 @@ func ClientReceive(conn *net.UDPConn, timeout int64) ([]byte, error) {
 		return nil, fmt.Errorf("creating the timeout deadline: %w", err)
 	}
 
-	n, _, err := conn.ReadFromUDP(buffer)
+	n, _, err := conn.ReadFrom(buffer)
 	if err != nil {
 		// return error as it is to match for timeout error type
 		return nil, err
