@@ -334,13 +334,14 @@ func (s *Server) handleACR(msg messages.ACR, addr net.Addr){
 
 			// read up to chunk size bytes
 			buf := make([]uint8, s.ChunkSize)
-    		_, err := f.Read(buf)
+			n, err := f.Read(buf)
 			if err != nil {
 				log.Printf("error while reading from the file: %v\n", err)
 				continue
 			}
 			// send the read bytes
-			msg := messages.GetCRR(msg.Header.Number, messages.NoError, *messages.Int2uint8_6_arr(chunk_number), &buf)
+			chunk := buf[:n]
+			msg := messages.GetCRR(msg.Header.Number, messages.NoError, *messages.Int2uint8_6_arr(chunk_number), &chunk)
 			msg.Send(s.Conn, addr)
 
 
