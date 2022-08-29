@@ -53,7 +53,6 @@ func EmptyToken() *[32]uint8 {
 	return token
 }
 
-
 type ServerMessage interface {
 	Send(conn net.PacketConn, addr net.Addr) error
 }
