@@ -11,8 +11,8 @@ import (
 	"os"
 	"time"
 
-	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/markov"
+	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 )
 
 type ClientConfig struct {
@@ -31,7 +31,7 @@ type ClientConfig struct {
 	WarnLogger  *log.Logger
 }
 
-var DefaultConfig = ClientConfig {
+var DefaultConfig = ClientConfig{
 	RetransmissionsMDR: 5,
 	InitialPacketRate:  10,
 	NCRRsToWait:        3,
@@ -55,9 +55,9 @@ type fileMetadata struct {
 
 	// Information on missing chunks
 
-	chunkMap       map[uint64]bool //chunkMap[chunk] == true iff chunk has been received
-	firstMissing   uint64          // The index of the first chunk not yet received
-	nReceived      int             // Number of chunks received. 
+	chunkMap     map[uint64]bool //chunkMap[chunk] == true iff chunk has been received
+	firstMissing uint64          // The index of the first chunk not yet received
+	nReceived    int             // Number of chunks received.
 
 	// Information on the connection
 
@@ -67,14 +67,14 @@ type fileMetadata struct {
 
 	// Local file pointer
 
-	localFile      *os.File
+	localFile *os.File
 }
 
 // These are fixed by the specification
 const (
-	initialTimeout    time.Duration = 3*time.Second
-	rtt2timeoutFactor int = 2 // timeout = rtt2timeoutFactor * rtt
-	maxChunkSize      uint16 = 65517
+	initialTimeout    time.Duration = 3 * time.Second
+	rtt2timeoutFactor int           = 2 // timeout = rtt2timeoutFactor * rtt
+	maxChunkSize      uint16        = 65517
 )
 
 // RequestFile connects to the server at address:port and tries to perform a
@@ -197,7 +197,7 @@ retransmit:
 					// We can't do anything if we don't speak the same language
 					return fmt.Errorf("parse server message: %w", err)
 				} else if errors.Is(err, new(messages.UnsupporedTypeError)) ||
-				errors.Is(err, new(messages.WrongPacketLengthError)) {
+					errors.Is(err, new(messages.WrongPacketLengthError)) {
 					// Ignore unknown messages, but still log the error
 					conf.WarnLogger.Printf("Invalid response received: %v. Dropped response:%x\n", err, raw)
 					continue receive
@@ -220,18 +220,18 @@ retransmit:
 				}
 
 				switch header.Error {
-					case messages.UnsupportedVersion:
-						// The server must have set its version number to the
-						// version it supports.
-						// If we're here, we didn't get an UnsupporedVersionError
-						// by the parser, so it means it's a version we support.
-						// This is an answer to a message we sent. We only
-						// support one version. Something's not right -> Error
-						return fmt.Errorf("MDRR server error: the server doesn't support our protocol version (%d) and answered with version %d", mdr.Header.Version, header.Version)
-					case messages.FileNotFound:
-						return fmt.Errorf("MDRR server error: File not found on server")
-					default:
-						return fmt.Errorf("MDRR server error: Unknown error code for MDRR %d", header.Error)
+				case messages.UnsupportedVersion:
+					// The server must have set its version number to the
+					// version it supports.
+					// If we're here, we didn't get an UnsupporedVersionError
+					// by the parser, so it means it's a version we support.
+					// This is an answer to a message we sent. We only
+					// support one version. Something's not right -> Error
+					return fmt.Errorf("MDRR server error: the server doesn't support our protocol version (%d) and answered with version %d", mdr.Header.Version, header.Version)
+				case messages.FileNotFound:
+					return fmt.Errorf("MDRR server error: File not found on server")
+				default:
+					return fmt.Errorf("MDRR server error: Unknown error code for MDRR %d", header.Error)
 				}
 			case messages.NTM:
 				ntm := response.(messages.NTM)
@@ -279,7 +279,7 @@ retransmit:
 
 // getMetadataFromMDRR overwrites relevant field in metadata with fields from
 // the MDRR.
-func getMetadataFromMDRR(metadata *fileMetadata, mdrr *messages.MDRR) error{
+func getMetadataFromMDRR(metadata *fileMetadata, mdrr *messages.MDRR) error {
 	metadata.chunkSize = mdrr.ChunkSize
 	metadata.maxChunksInACR = mdrr.MaxChunksInACR
 	metadata.fileID = mdrr.FileID
@@ -343,7 +343,7 @@ func getMissingChunks(conn net.Conn, metadata *fileMetadata, conf *ClientConfig)
 				// We can't do anything if we don't speak the same language
 				return fmt.Errorf("parse server message: %w", err)
 			} else if errors.Is(err, new(messages.UnsupporedTypeError)) ||
-			errors.Is(err, new(messages.WrongPacketLengthError)) {
+				errors.Is(err, new(messages.WrongPacketLengthError)) {
 				// Ignore unknown messages, but still log the error
 				conf.WarnLogger.Printf("Invalid response received: %v. Dropped response:%x\n", err, raw)
 				continue
@@ -438,7 +438,7 @@ func getMissingChunks(conn net.Conn, metadata *fileMetadata, conf *ClientConfig)
 			}
 			received = true
 			mapTimeCRRs[chunkIndexInACR] = t_recv
-			deadline = t_recv.Add(time.Duration(conf.NCRRsToWait+n_cr-chunkIndexInACR)*time.Second/time.Duration(metadata.packetRate))
+			deadline = t_recv.Add(time.Duration(conf.NCRRsToWait+n_cr-chunkIndexInACR) * time.Second / time.Duration(metadata.packetRate))
 
 			err = writeChunkToFile(metadata, chunkNumber, crr.Data, metadata.localFile)
 			if err != nil {
@@ -500,7 +500,7 @@ func buildACR(metadata *fileMetadata) (acr *messages.ACR, requested []uint64) {
 
 func writeChunkToFile(metadata *fileMetadata, chunkNumber uint64, data []byte, file *os.File) error {
 	if !metadata.chunkMap[chunkNumber] {
-		if chunkNumber != metadata.fileSize - 1 && len(data) != int(metadata.chunkSize) {
+		if chunkNumber != metadata.fileSize-1 && len(data) != int(metadata.chunkSize) {
 			return fmt.Errorf("invalid chunk size. Expected %d got %d", metadata.chunkSize, len(data))
 		}
 		offset := int64(chunkNumber) * int64(metadata.chunkSize)
@@ -510,7 +510,7 @@ func writeChunkToFile(metadata *fileMetadata, chunkNumber uint64, data []byte, f
 		}
 		// Update chunkMap and first Missing
 		metadata.chunkMap[chunkNumber] = true
-		metadata.nReceived ++
+		metadata.nReceived++
 		for metadata.chunkMap[metadata.firstMissing] {
 			metadata.firstMissing++
 		}

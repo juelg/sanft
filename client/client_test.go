@@ -29,10 +29,9 @@ var testConfig = ClientConfig{
 	WarnLogger:         log.New(os.Stderr, "WARN: ", log.LstdFlags),
 }
 
-
 func startMockServer(quit <-chan bool, conn net.PacketConn, filename string, chunkSize uint16, maxChunksInACR uint16, fileID uint32, fileData []byte) {
 	packetRateAddC := 10
-	fileSize := uint64((len(fileData) + int(chunkSize-1))/int(chunkSize))
+	fileSize := uint64((len(fileData) + int(chunkSize-1)) / int(chunkSize))
 	var checksum [32]byte
 	var token [32]uint8
 	h := sha256.New()
@@ -44,11 +43,11 @@ func startMockServer(quit <-chan bool, conn net.PacketConn, filename string, chu
 	copy(checksum[:], h.Sum(nil))
 	for {
 		select {
-		case <- quit:
+		case <-quit:
 			return
 		default:
 			addr, data, err := messages.ServerReceive(conn, 500)
-			if err != nil{
+			if err != nil {
 				if os.IsTimeout(errors.Unwrap(err)) {
 					continue
 				}
@@ -63,11 +62,11 @@ func startMockServer(quit <-chan bool, conn net.PacketConn, filename string, chu
 			}
 			copy(token[:], h.Sum(nil))
 			msg, err := messages.ParseClient(&data)
-			if err != nil{
+			if err != nil {
 				fmt.Printf("Mock Server: while parsing client message: %v\n", err)
 				continue
 			}
-			switch msg.(type){
+			switch msg.(type) {
 			case messages.MDR:
 				mdr := msg.(messages.MDR)
 				if mdr.Header.Token != token {
@@ -112,10 +111,10 @@ func startMockServer(quit <-chan bool, conn net.PacketConn, filename string, chu
 				n_cr := 0
 				packetRate := acr.PacketRate + uint32(packetRateAddC)
 				tNext := time.Now()
-				for _,cr := range acr.CRs {
+				for _, cr := range acr.CRs {
 					offset := messages.Uint8_6_arr2Int(cr.ChunkOffset)
-					for i:=offset; i < offset+uint64(cr.Length); i++ {
-						n_cr ++
+					for i := offset; i < offset+uint64(cr.Length); i++ {
+						n_cr++
 						if n_cr > int(maxChunksInACR) {
 							response := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t, Number: acr.Header.Number, Error: messages.TooManyChunks}
 							err = response.Send(conn, addr)
@@ -135,7 +134,7 @@ func startMockServer(quit <-chan bool, conn net.PacketConn, filename string, chu
 						time.Sleep(tNext.Sub(time.Now()))
 						var chunk []byte
 						if i < fileSize-1 {
-							chunk = fileData[i*uint64(chunkSize):(i+1)*uint64(chunkSize)]
+							chunk = fileData[i*uint64(chunkSize) : (i+1)*uint64(chunkSize)]
 						} else {
 							chunk = fileData[i*uint64(chunkSize):]
 						}
@@ -144,7 +143,7 @@ func startMockServer(quit <-chan bool, conn net.PacketConn, filename string, chu
 						if err != nil {
 							fmt.Printf("Mock Server: Error while sending CRR: %v\n", err)
 						}
-						tNext = time.Now().Add(time.Second/time.Duration(packetRate))
+						tNext = time.Now().Add(time.Second / time.Duration(packetRate))
 					}
 				}
 			}
@@ -163,7 +162,7 @@ func checkFileContains(file *os.File, data []byte) error {
 		return fmt.Errorf("file contains %d bytes of data. Expected %d", n, len(data))
 	}
 
-	for i:=0; i<n; i++ {
+	for i := 0; i < n; i++ {
 		if data[i] != fileData[i] {
 			return fmt.Errorf("file data differs from expected data at position %d. Expected %x got %x", i, data, fileData)
 		}
@@ -185,12 +184,12 @@ func FuzzBuildACR(f *testing.F) {
 	f.Fuzz(func(t *testing.T, maxChunksInACR uint16, fileSize uint64, receivedChunks []byte, fileID uint32) {
 		metadata.maxChunksInACR = maxChunksInACR
 		metadata.chunkMap = make(map[uint64]bool)
-		for _,rc := range receivedChunks {
+		for _, rc := range receivedChunks {
 			metadata.chunkMap[uint64(rc)] = true
 		}
 		metadata.firstMissing = 0
 		for metadata.chunkMap[metadata.firstMissing] {
-			metadata.firstMissing ++
+			metadata.firstMissing++
 		}
 		metadata.fileSize = fileSize
 		metadata.fileID = fileID
@@ -295,9 +294,9 @@ func TestChecksum(t *testing.T) {
 }
 
 func FuzzComputePacketRate(f *testing.F) {
-	f.Add(10, []byte{0,1,2,3,4,5,6,7,8,9}, []byte{50}, uint32(20))
-	f.Add(10, []byte{2,3,4,5,6,7,8,9}, []byte{100}, uint32(10))
-	f.Add(10, []byte{1,2,3,4,5,6,7,8,0,9}, []byte{80}, uint32(20))
+	f.Add(10, []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, []byte{50}, uint32(20))
+	f.Add(10, []byte{2, 3, 4, 5, 6, 7, 8, 9}, []byte{100}, uint32(10))
+	f.Add(10, []byte{1, 2, 3, 4, 5, 6, 7, 8, 0, 9}, []byte{80}, uint32(20))
 	// chunksArrived is the list of chunksNumber in the order in which they arrived
 	// arrivalTime is the time between each arrival in ms. If the list is not long enough, it loops.
 	f.Fuzz(func(t *testing.T, n_expected int, chunksArrived []byte, arrivalTime []byte, prevRate uint32) {
@@ -309,12 +308,12 @@ func FuzzComputePacketRate(f *testing.F) {
 			return
 		}
 
-		for i,c := range chunksArrived {
+		for i, c := range chunksArrived {
 			if int(c) >= n_expected {
 				return
 			}
 			timeMap[i] = tNext
-			tNext = tNext.Add(time.Duration(arrivalTime[i%len(arrivalTime)])*time.Millisecond)
+			tNext = tNext.Add(time.Duration(arrivalTime[i%len(arrivalTime)]) * time.Millisecond)
 		}
 
 		newRate, err := computePacketRate(timeMap, n_expected, prevRate)
@@ -327,7 +326,6 @@ func FuzzComputePacketRate(f *testing.F) {
 		}
 	})
 }
-
 
 func TestWriteChunkToFile(t *testing.T) {
 	var readBuf []byte
@@ -366,7 +364,7 @@ func TestWriteChunkToFile(t *testing.T) {
 		t.Fatalf("Error while reading file: %v", err)
 	}
 
-	for i:=0 ; i<int(metadata.chunkSize) ; i++ {
+	for i := 0; i < int(metadata.chunkSize); i++ {
 		if data[i] != readBuf[i] {
 			t.Fatalf("Different byte at position %d between original data %x and written data %x", i, data, readBuf)
 		}
@@ -383,23 +381,23 @@ func TestUpdateMetadata(t *testing.T) {
 	data := []byte("Not important")
 	quit := make(chan bool)
 
-    conn_server, err := messages.CreateServerSocket(IP, port)
-    if err != nil{
-        t.Fatalf(`Creating server failed: %v`, err)
-    }
+	conn_server, err := messages.CreateServerSocket(IP, port)
+	if err != nil {
+		t.Fatalf(`Creating server failed: %v`, err)
+	}
 	defer conn_server.Close()
 
 	go startMockServer(quit, conn_server, URI, chunkSize, maxChunksInACR, fileID, data)
-	defer func() {quit <- true}()
+	defer func() { quit <- true }()
 
-    conn_client, err := messages.CreateClientSocket(IP, port)
-    if err != nil{
-        t.Fatalf(`Creating client failed: %v`, err)
-    }
+	conn_client, err := messages.CreateClientSocket(IP, port)
+	if err != nil {
+		t.Fatalf(`Creating client failed: %v`, err)
+	}
 	defer conn_client.Close()
 
 	metadata := new(fileMetadata)
-	metadata.timeout = 3*time.Second
+	metadata.timeout = 3 * time.Second
 	metadata.url = URI
 
 	err = updateMetadata(conn_client, metadata, &testConfig)
@@ -450,23 +448,23 @@ func TestUpdateMetadataNotFound(t *testing.T) {
 	want := regexp.MustCompile(`not found`)
 	quit := make(chan bool)
 
-    conn_server, err := messages.CreateServerSocket(IP, port)
-    if err != nil{
-        t.Fatalf(`Creating server failed: %v`, err)
-    }
+	conn_server, err := messages.CreateServerSocket(IP, port)
+	if err != nil {
+		t.Fatalf(`Creating server failed: %v`, err)
+	}
 	defer conn_server.Close()
 
 	go startMockServer(quit, conn_server, URI, chunkSize, maxChunksInACR, fileID, data)
-	defer func() {quit <- true}()
+	defer func() { quit <- true }()
 
-    conn_client, err := messages.CreateClientSocket(IP, port)
-    if err != nil{
-        t.Fatalf(`Creating client failed: %v`, err)
-    }
+	conn_client, err := messages.CreateClientSocket(IP, port)
+	if err != nil {
+		t.Fatalf(`Creating client failed: %v`, err)
+	}
 	defer conn_client.Close()
 
 	metadata := new(fileMetadata)
-	metadata.timeout = 3*time.Second
+	metadata.timeout = 3 * time.Second
 	metadata.url = wrongURI
 
 	err = updateMetadata(conn_client, metadata, &testConfig)
@@ -483,12 +481,12 @@ func TestRequestFile(t *testing.T) {
 	port := 6666
 	filename := "/tmp/sanftTestRequest.dat"
 	var tests = []struct {
-		name string
-		URI string
-		chunkSize uint16
+		name           string
+		URI            string
+		chunkSize      uint16
 		maxChunksInACR uint16
-		fileID uint32
-		dataSize int
+		fileID         uint32
+		dataSize       int
 	}{
 		{"filesize is less than chunk size", "small", 64, 10, 0x00facade, 20},
 		{"one char URL", "/", 12, 34, 0x1, 10},
@@ -502,7 +500,7 @@ func TestRequestFile(t *testing.T) {
 	}
 
 	conn_server, err := messages.CreateServerSocket(IP, port)
-	if err != nil{
+	if err != nil {
 		t.Fatalf(`Creating server failed: %v`, err)
 	}
 	defer conn_server.Close()
@@ -517,7 +515,7 @@ func TestRequestFile(t *testing.T) {
 			quit := make(chan bool)
 
 			go startMockServer(quit, conn_server, tt.URI, tt.chunkSize, tt.maxChunksInACR, tt.fileID, data)
-			defer func() {quit <- true}()
+			defer func() { quit <- true }()
 
 			err = RequestFile(IP, port, tt.URI, filename, &testConfig)
 			if err != nil {
@@ -535,7 +533,7 @@ func TestRequestFile(t *testing.T) {
 				t.Fatalf("The received file doesn't have the right length. Expected %d got %d", len(data), len(fileData))
 			}
 
-			for i,b := range fileData {
+			for i, b := range fileData {
 				if b != data[i] {
 					t.Fatalf("The received data and sent data differ at position %d. Sent: %x; Received: %x", i, data, fileData)
 				}
@@ -555,23 +553,23 @@ func TestConnectionMigration(t *testing.T) {
 	filename := "/tmp/sanftTest.dat"
 	quit := make(chan bool)
 
-    conn_server, err := messages.CreateServerSocket(IP, port)
-    if err != nil{
-        t.Fatalf(`Creating server failed: %v`, err)
-    }
+	conn_server, err := messages.CreateServerSocket(IP, port)
+	if err != nil {
+		t.Fatalf(`Creating server failed: %v`, err)
+	}
 	defer conn_server.Close()
 
 	go startMockServer(quit, conn_server, URI, chunkSize, maxChunksInACR, fileID, data)
-	defer func() {quit <- true}()
+	defer func() { quit <- true }()
 
-    conn_client, err := messages.CreateClientSocket(IP, port)
-    if err != nil{
-        t.Fatalf(`Creating client failed: %v`, err)
-    }
+	conn_client, err := messages.CreateClientSocket(IP, port)
+	if err != nil {
+		t.Fatalf(`Creating client failed: %v`, err)
+	}
 	defer conn_client.Close()
 
 	metadata := new(fileMetadata)
-	metadata.timeout = 3*time.Second
+	metadata.timeout = 3 * time.Second
 	metadata.url = URI
 	metadata.packetRate = 10
 
@@ -592,10 +590,10 @@ func TestConnectionMigration(t *testing.T) {
 	}
 
 	// Connection migration !
-    conn_client2, err := messages.CreateClientSocket(IP, port)
-    if err != nil{
-        t.Fatalf(`Creating client failed: %v`, err)
-    }
+	conn_client2, err := messages.CreateClientSocket(IP, port)
+	if err != nil {
+		t.Fatalf(`Creating client failed: %v`, err)
+	}
 	defer conn_client2.Close()
 
 	for metadata.firstMissing < metadata.fileSize {
@@ -624,10 +622,10 @@ func TestFileIDChange(t *testing.T) {
 	filename := "/tmp/sanftTest.dat"
 	quit := make(chan bool)
 
-    conn_server, err := messages.CreateServerSocket(IP, port)
-    if err != nil{
-        t.Fatalf(`Creating server failed: %v`, err)
-    }
+	conn_server, err := messages.CreateServerSocket(IP, port)
+	if err != nil {
+		t.Fatalf(`Creating server failed: %v`, err)
+	}
 	defer conn_server.Close()
 	var wg sync.WaitGroup
 
@@ -637,14 +635,14 @@ func TestFileIDChange(t *testing.T) {
 		wg.Done()
 	}()
 
-    conn_client, err := messages.CreateClientSocket(IP, port)
-    if err != nil{
-        t.Fatalf(`Creating client failed: %v`, err)
-    }
+	conn_client, err := messages.CreateClientSocket(IP, port)
+	if err != nil {
+		t.Fatalf(`Creating client failed: %v`, err)
+	}
 	defer conn_client.Close()
 
 	metadata := new(fileMetadata)
-	metadata.timeout = 3*time.Second
+	metadata.timeout = 3 * time.Second
 	metadata.url = URI
 	metadata.packetRate = 10
 
@@ -696,10 +694,10 @@ func TestFileDeleted(t *testing.T) {
 	want := regexp.MustCompile(`not found`)
 	quit := make(chan bool)
 
-    conn_server, err := messages.CreateServerSocket(IP, port)
-    if err != nil{
-        t.Fatalf(`Creating server failed: %v`, err)
-    }
+	conn_server, err := messages.CreateServerSocket(IP, port)
+	if err != nil {
+		t.Fatalf(`Creating server failed: %v`, err)
+	}
 	defer conn_server.Close()
 	var wg sync.WaitGroup
 
@@ -709,14 +707,14 @@ func TestFileDeleted(t *testing.T) {
 		wg.Done()
 	}()
 
-    conn_client, err := messages.CreateClientSocket(IP, port)
-    if err != nil{
-        t.Fatalf(`Creating client failed: %v`, err)
-    }
+	conn_client, err := messages.CreateClientSocket(IP, port)
+	if err != nil {
+		t.Fatalf(`Creating client failed: %v`, err)
+	}
 	defer conn_client.Close()
 
 	metadata := new(fileMetadata)
-	metadata.timeout = 3*time.Second
+	metadata.timeout = 3 * time.Second
 	metadata.url = URI
 	metadata.packetRate = 10
 
