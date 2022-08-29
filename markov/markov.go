@@ -16,11 +16,11 @@ type MarkovConn struct{
 }
 
 // Implement the interface for net.PacketConn
-func (mc MarkovConn) ReadFrom(p []byte) (n int, addr net.Addr, err error){
+func (mc *MarkovConn) ReadFrom(p []byte) (n int, addr net.Addr, err error){
 	return mc.UDPConn.ReadFrom(p)
 }
 
-func (mc MarkovConn) WriteTo(p []byte, addr net.Addr) (n int, err error){
+func (mc *MarkovConn) WriteTo(p []byte, addr net.Addr) (n int, err error){
 	if mc.lastDropped {
 		if rand.Float64() < mc.Q {
 			// Drop
@@ -44,11 +44,11 @@ func (mc MarkovConn) WriteTo(p []byte, addr net.Addr) (n int, err error){
 
 
 // Implement the interface for net.Conn
-func (mc MarkovConn) Read(p []byte) (n int, err error){
+func (mc *MarkovConn) Read(p []byte) (n int, err error){
 	return mc.UDPConn.Read(p)
 }
 
-func (mc MarkovConn) Write(p []byte) (n int, err error){
+func (mc *MarkovConn) Write(p []byte) (n int, err error){
 	if mc.lastDropped {
 		if rand.Float64() < mc.Q {
 			// Drop
@@ -70,27 +70,27 @@ func (mc MarkovConn) Write(p []byte) (n int, err error){
 	}
 }
 
-func (mc MarkovConn) RemoteAddr() net.Addr {
+func (mc *MarkovConn) RemoteAddr() net.Addr {
 	return mc.UDPConn.RemoteAddr()
 }
 
 // Implement the interface for both net.Conn and net.PacketConn
-func (mc MarkovConn) Close() error {
+func (mc *MarkovConn) Close() error {
 	return mc.UDPConn.Close()
 }
 
-func (mc MarkovConn) LocalAddr() net.Addr {
+func (mc *MarkovConn) LocalAddr() net.Addr {
 	return mc.UDPConn.LocalAddr()
 }
 
-func (mc MarkovConn) SetDeadline(t time.Time) error {
+func (mc *MarkovConn) SetDeadline(t time.Time) error {
 	return mc.UDPConn.SetDeadline(t)
 }
 
-func (mc MarkovConn) SetReadDeadline(t time.Time) error {
+func (mc *MarkovConn) SetReadDeadline(t time.Time) error {
 	return mc.UDPConn.SetReadDeadline(t)
 }
 
-func (mc MarkovConn) SetWriteDeadline(t time.Time) error {
+func (mc *MarkovConn) SetWriteDeadline(t time.Time) error {
 	return mc.UDPConn.SetWriteDeadline(t)
 }

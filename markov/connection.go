@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net"
 )
-func CreateServerSocket(ip string, port int, p float64, q float64) (*MarkovConn, error){
+func CreateServerSocket(ip string, port int, p float64, q float64) (net.PacketConn, error){
 	laddr := net.UDPAddr{
 		Port: port,
 		IP:   net.ParseIP(ip),
@@ -22,7 +22,7 @@ func CreateServerSocket(ip string, port int, p float64, q float64) (*MarkovConn,
 	return markovConn, nil
 }
 
-func CreateClientSocket(address string, port int, p float64, q float64) (*MarkovConn, error){
+func CreateClientSocket(address string, port int, p float64, q float64) (net.Conn, error){
 	raddr, err := net.ResolveUDPAddr("udp", address + ":" + fmt.Sprint(port))
 	if err != nil {
 		return nil, fmt.Errorf("error resolving addr: %w", err)

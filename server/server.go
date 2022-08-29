@@ -14,6 +14,7 @@ import (
 	"os"
 	"time"
 
+	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/markov"
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 )
 
@@ -29,10 +30,10 @@ type Server struct {
 	// read out from some config:
 	ChunkSize      uint16
 	MaxChunksInACR uint16
-	Conn *net.UDPConn
+	Conn net.PacketConn
 	RootDir string
-	MarkovP float32
-	MarkovQ float32
+	MarkovP float64
+	MarkovQ float64
 
 	FileIDMap map[uint32] FileM
 
@@ -60,11 +61,7 @@ func createRandomKey() []uint8{
 
 // The values should be sanity checked before putting into this function
 // valid ip and port, markov p and q between 0 and 1, root_dir exists
-func Init(ip string, port int, root_dir string, chunk_size uint16, max_chunks_in_acr uint16, markovP float32, markovQ float32, rate_increase uint32) (*Server, error){
-    conn, err := messages.CreateServerSocket(ip, port)
-    if err != nil{
-		return nil, fmt.Errorf("error while creating the socket: %w", err)
-    }
+func Init(ip string, port int, root_dir string, chunk_size uint16, max_chunks_in_acr uint16, markovP float64, markovQ float64, rate_increase uint32) (*Server, error){
 	// check if root dir exists
 	if _, err := os.Stat(root_dir); os.IsNotExist(err) {
 		// root_dir does not exist does not exist
@@ -78,6 +75,11 @@ func Init(ip string, port int, root_dir string, chunk_size uint16, max_chunks_in
 	if root_dir[len(root_dir)-1] != '/'{
 		return nil, fmt.Errorf("invalid path, must end with a slash")
 	}
+    // conn, err := messages.CreateServerSocket(ip, port)
+    conn, err := markov.CreateServerSocket(ip, port, markovP, markovQ)
+    if err != nil{
+		return nil, fmt.Errorf("error while creating the socket: %w", err)
+    }
 
 	s := new(Server)
 	s.ChunkSize = chunk_size
@@ -161,7 +163,7 @@ func (s *Server) GetPath(path string) string{
 	return s.RootDir + path
 }
 
-func (s *Server) handleMDR(msg messages.MDR, addr *net.UDPAddr){
+func (s *Server) handleMDR(msg messages.MDR, addr net.Addr){
 	// - MDR: check token, (check if file exists) lookup file id (= hash out of path + last modified), filesize, checksum
 
 	// check token
@@ -250,7 +252,7 @@ func (s *Server) handleMDR(msg messages.MDR, addr *net.UDPAddr){
 }
 
 
-func (s *Server) handleACR(msg messages.ACR, addr *net.UDPAddr){
+func (s *Server) handleACR(msg messages.ACR, addr net.Addr){
 	// - ACR: check token, check file id in dict (what happens if mdr hasnt been send before?), read file chunk and return
 	if !s.checkToken(addr, &msg.Header.Token){
 		s.sendNTM(msg.Header.Number, messages.NoError, addr)
@@ -350,14 +352,14 @@ func (s *Server) handleACR(msg messages.ACR, addr *net.UDPAddr){
 
 }
 
-func (s *Server) sendNTM(number uint8, err uint8, addr *net.UDPAddr){
+func (s *Server) sendNTM(number uint8, err uint8, addr net.Addr){
 	token := s.createToken(addr)
 	ntm := messages.GetNTM(number, err, &token)
 	ntm.Send(s.Conn, addr)
 }
 
 
-func (s *Server) createToken(addr *net.UDPAddr) [32]uint8 {
+func (s *Server) createToken(addr net.Addr) [32]uint8 {
 	ip_port_bytes := getPortIPBytes(addr)
 
 	data := make([]byte, len(ip_port_bytes) + len(s.key))
@@ -366,7 +368,7 @@ func (s *Server) createToken(addr *net.UDPAddr) [32]uint8 {
 	return sha256.Sum256(data)
 }
 
-func (s *Server) checkToken(addr *net.UDPAddr, Token *[32]uint8) bool{
+func (s *Server) checkToken(addr net.Addr, Token *[32]uint8) bool{
 	return s.createToken(addr) == *Token
 }
 
@@ -387,10 +389,12 @@ func cont(cl chan bool) bool{
 
 
 // returns IP + Port bytes slice
-func getPortIPBytes(addr *net.UDPAddr) []byte{
-	ip_bytes := []byte(addr.IP)
+func getPortIPBytes(addr net.Addr) []byte{
+	// cast to net.UDPAddr
+	udpaddr := addr.(*net.UDPAddr)
+	ip_bytes := []byte(udpaddr.IP)
 	port_bytes := make([]byte, 2)
-	binary.LittleEndian.PutUint16(port_bytes, uint16(addr.Port))
+	binary.LittleEndian.PutUint16(port_bytes, uint16(udpaddr.Port))
 	return append(ip_bytes, port_bytes...)
 }
 
