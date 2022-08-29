@@ -22,13 +22,15 @@ var testConfig = ClientConfig{
 	RetransmissionsMDR: 3,
 	InitialPacketRate:  40,
 	NCRRsToWait:        3,
+	MarkovP:            0,
+	MarkovQ:            0,
 	DebugLogger:        log.New(ioutil.Discard, "DEBUG: ", log.LstdFlags),
 	InfoLogger:         log.New(ioutil.Discard, "INFO: ", log.LstdFlags),
 	WarnLogger:         log.New(os.Stderr, "WARN: ", log.LstdFlags),
 }
 
 
-func startMockServer(quit <-chan bool, conn *net.UDPConn, filename string, chunkSize uint16, maxChunksInACR uint16, fileID uint32, fileData []byte) {
+func startMockServer(quit <-chan bool, conn net.PacketConn, filename string, chunkSize uint16, maxChunksInACR uint16, fileID uint32, fileData []byte) {
 	packetRateAddC := 10
 	fileSize := uint64((len(fileData) + int(chunkSize-1))/int(chunkSize))
 	var checksum [32]byte

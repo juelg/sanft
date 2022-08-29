@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
+	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/markov"
 )
 
 type ClientConfig struct {
@@ -21,8 +22,8 @@ type ClientConfig struct {
 	NCRRsToWait        int    // Number of virtual CRR to wait for the next CRR to arrive
 
 	// Markov simulation of packet loss
-	P float64 // Probability of losing packet n+1 if n was not lost
-	Q float64 // Probability of losing packet n+1 if n was lost
+	MarkovP float64 // Probability of losing packet n+1 if n was not lost
+	MarkovQ float64 // Probability of losing packet n+1 if n was lost
 
 	// Debugging
 	DebugLogger *log.Logger
@@ -34,6 +35,8 @@ var DefaultConfig = ClientConfig {
 	RetransmissionsMDR: 5,
 	InitialPacketRate:  10,
 	NCRRsToWait:        3,
+	MarkovP:            0,
+	MarkovQ:            0,
 	DebugLogger:        log.New(ioutil.Discard, "DEBUG: ", log.LstdFlags),
 	InfoLogger:         log.New(os.Stderr, "INFO: ", log.LstdFlags),
 	WarnLogger:         log.New(os.Stderr, "WARN: ", log.LstdFlags),
@@ -83,7 +86,7 @@ func RequestFile(address string, port int, URI string, localFilename string, con
 	if err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
-	conn, err := messages.CreateClientSocket(address, port)
+	conn, err := markov.CreateClientSocket(address, port, conf.MarkovP, conf.MarkovQ)
 	if err != nil {
 		return fmt.Errorf("create client socket: %w", err)
 	}
@@ -140,12 +143,18 @@ func checkConfig(conf *ClientConfig) error {
 	if conf.NCRRsToWait < 3 {
 		conf.WarnLogger.Printf("nCRRsToWait is set to %d. The specification recommands to wait for at least 3 CRRs\n", conf.NCRRsToWait)
 	}
+	if conf.MarkovP < 0 || conf.MarkovP > 0 {
+		return errors.New("MarkovP must be in interval [0;1]")
+	}
+	if conf.MarkovQ < 0 || conf.MarkovQ > 0 {
+		return errors.New("MarkovQ must be in interval [0;1]")
+	}
 	return nil
 }
 
 // updateMetadata sends a MetaData Request to the server and parses the response
 // to update metadata.
-func updateMetadata(conn *net.UDPConn, metadata *fileMetadata, conf *ClientConfig) error {
+func updateMetadata(conn net.Conn, metadata *fileMetadata, conf *ClientConfig) error {
 	buf := make([]byte, 0x10000) // 64kB
 	if metadata.timeout == 0 {
 		return errors.New("metadata.timeout cannot be 0.")
@@ -171,14 +180,14 @@ retransmit:
 
 	receive:
 		for time.Now().Before(deadline) {
-			n, _, err := conn.ReadFromUDP(buf)
+			n, err := conn.Read(buf)
 			if err != nil {
 				if errors.Is(err, os.ErrDeadlineExceeded) {
 					// If it's a timeout, retransmit
 					continue retransmit
 				} else {
 					// Otherwise, let's see what happened
-					return fmt.Errorf("read from UDP: %w", err)
+					return fmt.Errorf("read from socket: %w", err)
 				}
 			}
 			raw := buf[:n]
@@ -294,7 +303,7 @@ func getMetadataFromMDRR(metadata *fileMetadata, mdrr *messages.MDRR) error{
 // Sends one ACR to get missing chunks.
 // This function also receives the CRRs, write them to localFile, update the
 // chunkMap and perform packet rate measurements.
-func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, conf *ClientConfig) error {
+func getMissingChunks(conn net.Conn, metadata *fileMetadata, conf *ClientConfig) error {
 	buf := make([]byte, 0x10000) // 64kB
 	// Build an ACR and send it
 	acr, requested := buildACR(metadata)
@@ -316,7 +325,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, conf *ClientCon
 		if err != nil {
 			return fmt.Errorf("set deadline: %w", err)
 		}
-		n, _, err := conn.ReadFromUDP(buf)
+		n, err := conn.Read(buf)
 		t_recv := time.Now()
 		if err != nil {
 			if os.IsTimeout(err) {
@@ -324,7 +333,7 @@ func getMissingChunks(conn *net.UDPConn, metadata *fileMetadata, conf *ClientCon
 				continue
 			} else {
 				// Return to see what the error was
-				return fmt.Errorf("read from UDP: %w", err)
+				return fmt.Errorf("read from socket: %w", err)
 			}
 		}
 		raw := buf[:n]
