@@ -71,6 +71,14 @@ func Init(ip net.IP, port int, root_dir string, chunk_size uint16, max_chunks_in
 	if markovP >1 || markovP <0 || markovQ >1 || markovQ <0 {
 		return nil, fmt.Errorf("p and/or q values for the markov chain are invalid")
 	}
+	// check that the chunk size is valid
+	if chunk_size == 0 || chunk_size > 65517 {
+		return nil, fmt.Errorf("chunk size must be at least 1 and at most 65517")
+	}
+	// check that max_chunks_in_acr
+	if max_chunks_in_acr == 0{
+		return nil, fmt.Errorf("max_chunks_in_acr cannot be 0")
+	}
 	// check if path is valid
 	if root_dir[len(root_dir)-1] != '/'{
 		return nil, fmt.Errorf("invalid path, must end with a slash")
@@ -223,7 +231,7 @@ func (s *Server) handleMDR(msg messages.MDR, addr net.Addr){
 
 		filem, ok := s.FileIDMap[fileid]
 		if ok {
-			if filem.Path == msg.URI && filem.T == lastChanged {
+			if filem.Path == filepath && filem.T == lastChanged {
 				// same file: use this file id
 				checksum = filem.Checksum
 				break

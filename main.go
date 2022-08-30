@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path"
 
@@ -50,8 +51,14 @@ func main() {
 		if folder[len(folder)-1] != '/'{
 			folder = folder + "/"
 		}
-		if *chunkSize > 65517 {
-			fmt.Println("error: Chunk Size must not be larger than 65517")
+		// Protocol specification limitations
+		if *chunkSize == 0 || *chunkSize > 65517 {
+			fmt.Println("error: Chunk size must be non-zero and no larger than 65517")
+			os.Exit(1)
+		}
+		// Avoid an overflow when casting to uint16
+		if *maxChunksInACR == 0 || *maxChunksInACR > math.MaxUint16 {
+			fmt.Printf("error: max-chunks-in-acr must be non-zero and no larger than %d\n", math.MaxUint16)
 			os.Exit(1)
 		}
 

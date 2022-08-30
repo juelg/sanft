@@ -451,7 +451,11 @@ func getMissingChunks(conn net.Conn, metadata *fileMetadata, conf *ClientConfig)
 					continue
 				}
 			}
-			received = true
+			if !received {
+				// If it's the first CRR we receive, update RTT
+				metadata.timeout = time.Now().Sub(t_send) * time.Duration(rtt2timeoutFactor)
+				received = true
+			}
 			mapTimeCRRs[chunkIndexInACR] = t_recv
 			deadline = t_recv.Add(time.Duration(conf.NCRRsToWait+n_cr-chunkIndexInACR) * time.Second / time.Duration(metadata.packetRate))
 
