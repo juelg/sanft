@@ -37,7 +37,7 @@ in a single ACR, advertised by the server in the Metadata Request Response.
 The implementation is divided into 5 major Go packages: firstly, we have the general implementation of messages
 including the sending an receiving of them in the `messages` package. Next, the implementations 
 of server and client can be found in the respective `server` and `client` packages.
-Finally, the implementation of the packet loss simulation can be found in the 'markov' package.
+Finally, the implementation of the packet loss simulation can be found in the `markov` package.
 In addition to these 4 rather specific packages, the general `main` package ties all components together and
 provides the implementation of the CLI.
 
@@ -45,8 +45,8 @@ provides the implementation of the CLI.
 To our surprise, most of the implementation went rather smoothly. However, inevitably, there were some minor
 inconveniences, albeit none which proved to be significant hurdles or impediments.
 
-Firstly, when writing a protocol specification, 24 bit sized fields might seem like a good (or at least innocuous) idea;
-however, when implementing a protocol, 24 bit sized fields quickly become an encumbrance, since there is no data type
+Firstly, when writing a protocol specification, 48 bit sized fields might seem like a good (or at least innocuous) idea;
+however, when implementing a protocol, 48 bit sized fields quickly become an encumbrance, since there is no data type
 thorough which they could be represented elegantly.
 
 A significant challenge which is sightly more configuration rather than implementation related was the task of
@@ -67,11 +67,13 @@ discuss in the next subsection.
 During the implementation process, we came to the realization that there is a theoretical scenario in which following
 the specification to the letter would result in measuring a negative packet rate.
 In order for this to happen, the client would have to receive the first CR (with lowest index) after the last CR.
-In this case timeExpectedFirst would be smaller than timeExpectedLast, thus resulting in a negative packetRate.
+In this case timeExpectedFirst would be larger than timeExpectedLast, thus resulting in a negative packetRate.
 Although this situation is unlikely to occur as long as we never have a very high packet rate combined with a
-very small ACR, we decided to address this edge case by TODO.
+very small ACR, we decided to address this edge case by using another formula when this happens: instead of measuring
+a packetRate from the (estimated) times of arrivals, the new packetRate is computed as the previous packetRate multiplied
+by the number of received chunks over the number of expected chunks.
 
 ### What would you do differently if you started all over again?
-* No 24 bit field sizes!
+* No 48 bit field sizes!
 * Make sure the spec covers all edge cases.
 
