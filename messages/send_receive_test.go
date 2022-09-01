@@ -10,14 +10,6 @@ import (
 	"testing"
 )
 
-// func createStaticToken() *[32]uint8{
-//     token := new([32]uint8)
-//     for idx := range token{
-//         token[idx] = uint8(idx)
-//     }
-//     return token
-// }
-
 func createRandomToken() *[32]uint8 {
 	token := make([]uint8, 32)
 	rand.Read(token)
@@ -38,8 +30,6 @@ func createTestServerAndClient(t *testing.T) (*net.UDPConn, *net.UDPConn, net.Ad
 	// send test message to get client ip
 
 	msg := GetMDR(0, createRandomToken(), "some/thing")
-	// TODO: I find this msg.send unintuative and would rather prefer something like
-	// client.send(msg)
 	err = msg.Send(conn_client)
 	if err != nil {
 		t.Fatalf(`Error while sending message to server: %v`, err)

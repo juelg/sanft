@@ -7,8 +7,6 @@ import (
 	"net"
 )
 
-// TODO, big endian and check for packed
-
 func (m ServerHeader) Send(conn net.PacketConn, addr net.Addr) error {
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, binary.BigEndian, m)

@@ -295,10 +295,6 @@ func TestACR(t *testing.T) {
 	assert.Equal(t, messages.Uint8_6_arr2Int(crrs[2].ChunkNumber), uint64(2), "wrong chunk number for chunk 2")
 	assert.Equal(t, string(crrs[2].Data), "adipiscing elit, sed", "wrong chunk content for chunk 2")
 
-	// TODO: check possible edge cases / errors:
-	// wrong token, wrong file id, correct file id but modified in between,
-	// too many chunks requested, chunk out of bounds
-
 	// wrong token
 
 	crlist = make([]messages.CR, 1)

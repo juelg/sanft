@@ -50,15 +50,11 @@ func createRandomKey() []uint8 {
 	return key
 }
 
-// initialize: chunksize, root folder, max chunks in acr, markov chain probabilities
-// TODO: markov chain for client and server together
+// Initialize: chunksize, root folder, max chunks in acr
 // work: listen for requests and answer them in go routine
 // - MDR: check token, lookup file id (= hash out of path + last modified), filesize, checksum
 // - ACR: check token, read file chunk
 // to check whether the current file id is the latest -> map[fileid] -> path -> lookup and calc fileid
-
-// The values should be sanity checked before putting into this function
-// valid ip and port, markov p and q between 0 and 1, root_dir exists
 func Init(ip net.IP, port int, root_dir string, chunk_size uint16, max_chunks_in_acr uint16, markovP float64, markovQ float64, rate_increase float64) (*Server, error) {
 	// check if root dir exists
 	if _, err := os.Stat(root_dir); os.IsNotExist(err) {
@@ -112,8 +108,6 @@ func (s *Server) NewKey() {
 // the only purpose of the channel is to tell the function
 // when to stop listening
 func (s *Server) Listen(close chan bool) error {
-	// TODO: listen until channel says stop?
-	// TODO this shouldnt return an error but instead just log
 
 	for cont(close) {
 		// short timeout to be responsive
@@ -139,7 +133,6 @@ func (s *Server) Listen(close chan bool) error {
 
 		if errors.As(err, &e3) {
 			// wrong version
-			// TODO: should the token be checked before? should we still include valid number?
 			msgr := messages.ServerHeader{Version: messages.VERS, Type: data[1], Number: data[2], Error: messages.UnsupportedVersion}
 			msgr.Send(s.Conn, addr)
 			continue
@@ -161,9 +154,6 @@ func (s *Server) Listen(close chan bool) error {
 }
 
 func (s *Server) GetPath(path string) string {
-	// re := s.RootDir + path
-	// return strings.Replace(re, "//", "/", 1)
-	// TODO: path should start with /
 	return s.RootDir + path
 }
 

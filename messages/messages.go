@@ -5,8 +5,6 @@ import (
 	"net"
 )
 
-// TODO: do we need to pack the structs? -> should already be packed when casting in binary
-
 // version
 const VERS uint8 = 0
 
@@ -48,7 +46,6 @@ func Uint8_6_arr2Int(d [6]uint8) uint64 {
 
 func EmptyToken() *[32]uint8 {
 	token := new([32]uint8)
-	// re := make([]uint8, 32)
 	return token
 }
 

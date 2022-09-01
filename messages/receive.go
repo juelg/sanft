@@ -46,7 +46,6 @@ func ServerReceive(conn net.PacketConn, timeout int64) (net.Addr, []byte, error)
 	if err != nil {
 		return nil, nil, err
 	}
-	// TODO: is this bad because is copies memory around?
 	return raddr, buffer[:n], nil
 }
 
@@ -65,7 +64,6 @@ func ClientReceive(conn net.PacketConn, timeout int64) ([]byte, error) {
 		// return error as it is to match for timeout error type
 		return nil, err
 	}
-	// TODO: is this bad because is copies memory around?
 	return buffer[:n], nil
 }
 
@@ -159,7 +157,6 @@ func ParseServer(data *[]byte) (ServerMessage, error) {
 	}
 
 	r := bytes.NewReader(d)
-	// TODO: is this a pointer type?
 	var parsed_data ServerMessage
 	var err error
 	switch d[1] {
