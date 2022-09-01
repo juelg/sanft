@@ -1,7 +1,18 @@
 # The SANFT Protocol Go Implementation
 
-## Compiling and Installing Instructions
-TODO
+## Compiling Instructions
+First you need to install `Go` on your system. Checkout the [Go documentation](https://go.dev/doc/install) if you are new to go.
+
+In order to compile our project, clone it, cd into it and run `go build`:
+```shell
+git clone git@gitlab.lrz.de:protocol-design-sose-2022-team-0/sanft.git
+cd sanft
+go build
+```
+You will now find a new executable called `sanft`. Checkout its command line option by using
+```shell
+sanft --help
+```
 
 ## Usage
 The CLI of the SANFT implementation follows the assignment specification;
@@ -32,6 +43,9 @@ set the number of packets per second that the server which the server adds to th
 by the client, and the `--max-chunks-in-acr` flag pertaining to the maximum permitted number of Chunk Requests
 in a single ACR, advertised by the server in the Metadata Request Response.
 
+## Tests
+Every package except the main one has tests. In order to run theses tests cd into the repsective package and run `go test`.
+
 ## Assignment Task: Briefly record what you did and what you learned
 ### How is your program structured?
 The implementation is divided into 5 major Go packages: firstly, we have the general implementation of messages
@@ -44,10 +58,15 @@ provides the implementation of the CLI.
 ### Which were the major implementation issues?
 To our surprise, most of the implementation went rather smoothly. However, inevitably, there were some minor
 inconveniences, albeit none which proved to be significant hurdles or impediments.
+This is probably due to our intensitve particice of using test cases whereever possible.
+Every package excpet the main package comes with its own test cases.
+Thus, most of the bugs could already be addressed during development and when we tested the interoperablility of client and server it worked immeditatly with almost not problems.
 
 Firstly, when writing a protocol specification, 48 bit sized fields might seem like a good (or at least innocuous) idea;
 however, when implementing a protocol, 48 bit sized fields quickly become an encumbrance, since there is no data type
 thorough which they could be represented elegantly.
+Thus, a byte array had to be used to represent the 48 bit field, which required two wrapper functions converting from and to normal
+64 bit integers.
 
 A significant challenge which is sightly more configuration rather than implementation related was the task of
 coming up with useful default values. In our specification, we deliberately choose to let the server decide on certain
@@ -72,6 +91,8 @@ Although this situation is unlikely to occur as long as we never have a very hig
 very small ACR, we decided to address this edge case by using another formula when this happens: instead of measuring
 a packetRate from the (estimated) times of arrivals, the new packetRate is computed as the previous packetRate multiplied
 by the number of received chunks over the number of expected chunks.
+
+On the server side we realized that in the Chunk Request Response for the "Too Many Chunks" error it is not specified if the server has to check first for this error and do not answer any of Chunk Requests or if the server has to process all chunks previous to the chunk which results in the error. We decided to answer all previous Chunk Requests and only answer with the error once it occurs in the answering loop instead of checking for the error before hand and don't answer any requests.
 
 ### What would you do differently if you started all over again?
 * No 48 bit field sizes!
