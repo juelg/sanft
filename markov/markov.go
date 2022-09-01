@@ -6,9 +6,8 @@ import (
 	"time"
 )
 
-
-type MarkovConn struct{
-	UDPConn    *net.UDPConn
+type MarkovConn struct {
+	UDPConn *net.UDPConn
 	P       float64
 	Q       float64
 
@@ -16,11 +15,11 @@ type MarkovConn struct{
 }
 
 // Implement the interface for net.PacketConn
-func (mc *MarkovConn) ReadFrom(p []byte) (n int, addr net.Addr, err error){
+func (mc *MarkovConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 	return mc.UDPConn.ReadFrom(p)
 }
 
-func (mc *MarkovConn) WriteTo(p []byte, addr net.Addr) (n int, err error){
+func (mc *MarkovConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	if mc.lastDropped {
 		if rand.Float64() < mc.Q {
 			// Drop
@@ -42,13 +41,12 @@ func (mc *MarkovConn) WriteTo(p []byte, addr net.Addr) (n int, err error){
 	}
 }
 
-
 // Implement the interface for net.Conn
-func (mc *MarkovConn) Read(p []byte) (n int, err error){
+func (mc *MarkovConn) Read(p []byte) (n int, err error) {
 	return mc.UDPConn.Read(p)
 }
 
-func (mc *MarkovConn) Write(p []byte) (n int, err error){
+func (mc *MarkovConn) Write(p []byte) (n int, err error) {
 	if mc.lastDropped {
 		if rand.Float64() < mc.Q {
 			// Drop

@@ -11,7 +11,7 @@ func TestInt2uint8_6_arr2int(t *testing.T) {
 	c := Uint8_6_arr2Int(*b)
 
 	if a != c {
-		t.Fatalf("Invalid value after uint64->[6]uint8->uint64. Expected %x got %x.", a, c);
+		t.Fatalf("Invalid value after uint64->[6]uint8->uint64. Expected %x got %x.", a, c)
 	}
 }
 
@@ -21,6 +21,6 @@ func TestUint8_6_arr2Int2uint8_6_arr(t *testing.T) {
 	c := Int2uint8_6_arr(b)
 
 	if a != *c {
-		t.Fatalf("Invalid value after uint64->[6]uint8->uint64. Expected %x got %x.", a, c);
+		t.Fatalf("Invalid value after uint64->[6]uint8->uint64. Expected %x got %x.", a, c)
 	}
 }

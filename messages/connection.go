@@ -1,4 +1,3 @@
-
 package messages
 
 import (
@@ -6,8 +5,7 @@ import (
 	"net"
 )
 
-
-func CreateServerSocket(ip net.IP, port int) (*net.UDPConn, error){
+func CreateServerSocket(ip net.IP, port int) (*net.UDPConn, error) {
 	laddr := net.UDPAddr{
 		Port: port,
 		IP:   ip,
@@ -19,7 +17,7 @@ func CreateServerSocket(ip net.IP, port int) (*net.UDPConn, error){
 	return conn, nil
 }
 
-func CreateClientSocket(ip net.IP, port int) (*net.UDPConn, error){
+func CreateClientSocket(ip net.IP, port int) (*net.UDPConn, error) {
 	raddr := &net.UDPAddr{
 		Port: port,
 		IP:   ip,

@@ -9,7 +9,7 @@ git clone git@gitlab.lrz.de:protocol-design-sose-2022-team-0/sanft.git
 cd sanft
 go build
 ```
-You will now find a new executable called `sanft`. Checkout its command line option by using
+You will now find a new executable called `sanft`. Checkout its command line options by using
 ```shell
 sanft --help
 ```

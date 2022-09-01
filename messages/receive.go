@@ -8,28 +8,29 @@ import (
 	"time"
 )
 
-
-type UnsupporedVersionError struct{
+type UnsupporedVersionError struct {
 	s string
 }
+
 func (e *UnsupporedVersionError) Error() string {
 	return e.s
 }
 
-type UnsupporedTypeError struct{
+type UnsupporedTypeError struct {
 	s string
 }
+
 func (e *UnsupporedTypeError) Error() string {
 	return e.s
 }
 
-type WrongPacketLengthError struct{
+type WrongPacketLengthError struct {
 	s string
 }
+
 func (e *WrongPacketLengthError) Error() string {
 	return e.s
 }
-
 
 // timeout in milli seconds
 func ServerReceive(conn net.PacketConn, timeout int64) (net.Addr, []byte, error) {
@@ -68,7 +69,6 @@ func ClientReceive(conn net.PacketConn, timeout int64) ([]byte, error) {
 	return buffer[:n], nil
 }
 
-
 // Parses messages received by the server and send by the client
 func ParseClient(data *[]byte) (ClientMessage, error) {
 	// error types: unsupported version, unsupported type, length miss match (TODO check packet lengths)
@@ -76,12 +76,12 @@ func ParseClient(data *[]byte) (ClientMessage, error) {
 
 	// assert client header length
 	if len(d) < 35 {
-		return nil, &WrongPacketLengthError{s:fmt.Sprintf("packet too small, cant fit header, should be at least 35B is %d", len(d))}
+		return nil, &WrongPacketLengthError{s: fmt.Sprintf("packet too small, cant fit header, should be at least 35B is %d", len(d))}
 	}
 
 	// check version
 	if d[0] != VERS {
-		return nil, &UnsupporedVersionError{s:fmt.Sprintf("wrong version: %d", d[0])}
+		return nil, &UnsupporedVersionError{s: fmt.Sprintf("wrong version: %d", d[0])}
 	}
 
 	var parsed_data ClientMessage
@@ -90,7 +90,7 @@ func ParseClient(data *[]byte) (ClientMessage, error) {
 	case MDR_t:
 		// assert packet length: header + at least one byte URI
 		if len(d) < 36 {
-			return nil, &WrongPacketLengthError{s:fmt.Sprintf("packet too small, cant fit URI, should be at least 36B is %d", len(d))}
+			return nil, &WrongPacketLengthError{s: fmt.Sprintf("packet too small, cant fit URI, should be at least 36B is %d", len(d))}
 		}
 
 		var mdr MDR
@@ -105,7 +105,7 @@ func ParseClient(data *[]byte) (ClientMessage, error) {
 	case ACR_t:
 		// assert length: header + 8B + >= 7B (at least one CR)
 		if len(d) < 50 {
-			return nil, &WrongPacketLengthError{s:fmt.Sprintf("packet too small should be at least 50B is %d", len(d))}
+			return nil, &WrongPacketLengthError{s: fmt.Sprintf("packet too small should be at least 50B is %d", len(d))}
 		}
 
 		var acr ACR
@@ -122,9 +122,9 @@ func ParseClient(data *[]byte) (ClientMessage, error) {
 			return nil, fmt.Errorf("failed to read: %w", err)
 		}
 
-		acr.CRs = make([]CR, (len(d) - 43)/7)
+		acr.CRs = make([]CR, (len(d)-43)/7)
 
-		for i:=0; i < (len(d) - 43)/7; i++{
+		for i := 0; i < (len(d)-43)/7; i++ {
 			// var cr CR
 			err = binary.Read(bytes.NewBuffer(d[43+7*i:43+7*i+7]), binary.BigEndian, &acr.CRs[i])
 			if err != nil {
@@ -135,7 +135,7 @@ func ParseClient(data *[]byte) (ClientMessage, error) {
 		parsed_data = acr
 	default:
 		// no valid client packet
-		return nil, &UnsupporedTypeError{s:fmt.Sprintf("unsupported client type %d", d[1])}
+		return nil, &UnsupporedTypeError{s: fmt.Sprintf("unsupported client type %d", d[1])}
 	}
 
 	if err != nil {
@@ -150,12 +150,12 @@ func ParseServer(data *[]byte) (ServerMessage, error) {
 	d := *data
 	// assert server header length
 	if len(d) < 4 {
-		return nil, &WrongPacketLengthError{s:fmt.Sprintf("packet too small, cant fit header, should be at least 4B is %d", len(d))}
+		return nil, &WrongPacketLengthError{s: fmt.Sprintf("packet too small, cant fit header, should be at least 4B is %d", len(d))}
 	}
 
 	// check version
 	if d[0] != VERS {
-		return nil, &UnsupporedVersionError{s:fmt.Sprintf("wrong version: %d", d[0])}
+		return nil, &UnsupporedVersionError{s: fmt.Sprintf("wrong version: %d", d[0])}
 	}
 
 	r := bytes.NewReader(d)
@@ -166,7 +166,7 @@ func ParseServer(data *[]byte) (ServerMessage, error) {
 	case NTM_t:
 		// assert packet length: header + 32B
 		if len(d) < 36 {
-			return nil, &WrongPacketLengthError{s:fmt.Sprintf("packet too small, should be at least 36B is %d", len(d))}
+			return nil, &WrongPacketLengthError{s: fmt.Sprintf("packet too small, should be at least 36B is %d", len(d))}
 		}
 		var ntm NTM
 		err = binary.Read(r, binary.BigEndian, &ntm)
@@ -182,7 +182,7 @@ func ParseServer(data *[]byte) (ServerMessage, error) {
 		}
 		// assert packet length: header + 2*2 + 4 + 6 + 32
 		if len(d) < 50 {
-			return nil, &WrongPacketLengthError{s:fmt.Sprintf("packet too small, should be at least 50B is %d", len(d))}
+			return nil, &WrongPacketLengthError{s: fmt.Sprintf("packet too small, should be at least 50B is %d", len(d))}
 		}
 		var mdrr MDRR
 		err = binary.Read(r, binary.BigEndian, &mdrr)
@@ -199,7 +199,7 @@ func ParseServer(data *[]byte) (ServerMessage, error) {
 		// assert packet length: header + 6 + >=1 (at least one data bytes)
 		// If there is an out of bound error, there is only the offset and no data
 		if len(d) < 10 || (d[3] != ChunkOutOfBounds && len(d) < 11) {
-			return nil, &WrongPacketLengthError{s:fmt.Sprintf("packet too small, should be at least 11B is %d", len(d))}
+			return nil, &WrongPacketLengthError{s: fmt.Sprintf("packet too small, should be at least 11B is %d", len(d))}
 		}
 		var crr CRR
 
@@ -217,7 +217,7 @@ func ParseServer(data *[]byte) (ServerMessage, error) {
 
 	default:
 		// no valid server packet
-		return nil, &UnsupporedTypeError{s:fmt.Sprintf("unsupported server type %d", d[1])}
+		return nil, &UnsupporedTypeError{s: fmt.Sprintf("unsupported server type %d", d[1])}
 	}
 
 	if err != nil {

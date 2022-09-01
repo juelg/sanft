@@ -14,14 +14,13 @@ const VERS uint8 = 0
 const (
 	NTM_t  uint8 = 0
 	MDRR_t uint8 = 2
-	CRR_t		 = 4
+	CRR_t        = 4
 )
-
 
 // client message types
 const (
 	MDR_t uint8 = 1
-	ACR_t uint8	= 3
+	ACR_t uint8 = 3
 )
 
 // error codes
@@ -38,7 +37,7 @@ const (
 func Int2uint8_6_arr(a uint64) *[6]uint8 {
 	b := make([]uint8, 8)
 	binary.LittleEndian.PutUint64(b, a)
-    return (*[6]uint8)(b[:6])
+	return (*[6]uint8)(b[:6])
 }
 
 func Uint8_6_arr2Int(d [6]uint8) uint64 {
@@ -48,7 +47,7 @@ func Uint8_6_arr2Int(d [6]uint8) uint64 {
 }
 
 func EmptyToken() *[32]uint8 {
-    token := new([32]uint8)
+	token := new([32]uint8)
 	// re := make([]uint8, 32)
 	return token
 }
@@ -80,7 +79,7 @@ type NTM struct {
 	Token  [32]uint8
 }
 
-func GetNTM(number uint8, err uint8, token *[32]uint8) *NTM{
+func GetNTM(number uint8, err uint8, token *[32]uint8) *NTM {
 	ntm := new(NTM)
 	ntm.Header = ServerHeader{Version: VERS, Type: NTM_t, Number: number, Error: err}
 	ntm.Token = *token
@@ -92,7 +91,7 @@ type MDR struct {
 	URI    string /* this must be handled manualy when sending */
 }
 
-func GetMDR(number uint8, token *[32]uint8, uri string) *MDR{
+func GetMDR(number uint8, token *[32]uint8, uri string) *MDR {
 	mdr := new(MDR)
 	mdr.Header = ClientHeader{Version: VERS, Type: MDR_t, Number: number, Token: *token}
 	mdr.URI = uri
@@ -109,7 +108,7 @@ type MDRR struct {
 }
 
 func GetMDRR(number uint8, err uint8, chunk_size uint16,
-			max_chunks_in_acr uint16, fileid uint32, filesize [6]uint8, checksum *[32]uint8) *MDRR{
+	max_chunks_in_acr uint16, fileid uint32, filesize [6]uint8, checksum *[32]uint8) *MDRR {
 	mdrr := new(MDRR)
 	mdrr.Header = ServerHeader{Version: VERS, Type: MDRR_t, Number: number, Error: err}
 	mdrr.ChunkSize = chunk_size
@@ -125,7 +124,7 @@ type CR struct {
 	Length      uint8
 }
 
-func GetCR(chunkoffset [6]uint8, length uint8) *CR{
+func GetCR(chunkoffset [6]uint8, length uint8) *CR {
 	cr := new(CR)
 	cr.ChunkOffset = chunkoffset
 	cr.Length = length
@@ -139,7 +138,7 @@ type ACR struct {
 	CRs        []CR
 }
 
-func GetACR(number uint8, token *[32]uint8, fileid uint32, packet_rate uint32, crlist *[]CR) *ACR{
+func GetACR(number uint8, token *[32]uint8, fileid uint32, packet_rate uint32, crlist *[]CR) *ACR {
 	acr := new(ACR)
 	acr.Header = ClientHeader{Version: VERS, Type: ACR_t, Number: number, Token: *token}
 	acr.FileID = fileid
@@ -154,7 +153,7 @@ type CRR struct {
 	Data        []uint8
 }
 
-func GetCRR(number uint8, err uint8, chunknumber [6]uint8, data *[]uint8) *CRR{
+func GetCRR(number uint8, err uint8, chunknumber [6]uint8, data *[]uint8) *CRR {
 	crr := new(CRR)
 	crr.Header = ServerHeader{Version: VERS, Type: CRR_t, Number: number, Error: err}
 	crr.ChunkNumber = chunknumber

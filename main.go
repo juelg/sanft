@@ -38,17 +38,16 @@ func main() {
 		os.Exit(1)
 	}
 
-
 	fmt.Printf("Host: %s, Server Mode: %t, port: %d, markovP: %f markovQ: %f, file-dir: %s, files: %s\n", *host, *serverMode, *port, *markovP, *markovQ, *fileDir, *files)
 	fmt.Println("files: ", *files)
 
 	if *serverMode { /* server mode */
 		// replace empty path with "." and add trailing "/"
-		if *fileDir == ""{
+		if *fileDir == "" {
 			*fileDir = "./"
 		}
 		folder := *fileDir
-		if folder[len(folder)-1] != '/'{
+		if folder[len(folder)-1] != '/' {
 			folder = folder + "/"
 		}
 		// Protocol specification limitations
@@ -65,15 +64,14 @@ func main() {
 		log.Println("Starting server")
 
 		s, err := server.Init(*host, *port, folder, uint16(*chunkSize), uint16(*maxChunksInACR),
-								*markovP, *markovQ, *rateIncrease)
-		if err != nil{
+			*markovP, *markovQ, *rateIncrease)
+		if err != nil {
 			log.Panicf(`Error creating server: %v`, err)
 		}
 		defer s.Conn.Close()
 
 		close := make(chan bool)
 		s.Listen(close)
-
 
 	} else { /* client mode */
 		if len(*files) < 1 {
@@ -87,11 +85,11 @@ func main() {
 		clientConfig.MarkovQ = *markovQ
 
 		// Request files sequentially
-		for _,file := range *files {
+		for _, file := range *files {
 			localFileName := path.Join(*fileDir, file)
 			err := client.RequestFile(*host, *port, file, localFileName, &clientConfig)
 			if err != nil {
-				fmt.Printf("File request for %q failed: %v\n", file, err);
+				fmt.Printf("File request for %q failed: %v\n", file, err)
 			}
 		}
 	}

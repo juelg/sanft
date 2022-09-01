@@ -5,8 +5,8 @@ import (
 	"net"
 )
 
-		// IP:   net.ParseIP(ip),
-func CreateServerSocket(ip net.IP, port int, p float64, q float64) (net.PacketConn, error){
+// IP:   net.ParseIP(ip),
+func CreateServerSocket(ip net.IP, port int, p float64, q float64) (net.PacketConn, error) {
 	laddr := net.UDPAddr{
 		Port: port,
 		IP:   ip,
@@ -16,15 +16,15 @@ func CreateServerSocket(ip net.IP, port int, p float64, q float64) (net.PacketCo
 		return nil, fmt.Errorf("error creating ListenUDP: %w", err)
 	}
 	markovConn := &MarkovConn{
-		UDPConn: conn,
-		P: p,
-		Q: q,
+		UDPConn:     conn,
+		P:           p,
+		Q:           q,
 		lastDropped: false,
 	}
 	return markovConn, nil
 }
 
-func CreateClientSocket(ip net.IP, port int, p float64, q float64) (net.Conn, error){
+func CreateClientSocket(ip net.IP, port int, p float64, q float64) (net.Conn, error) {
 	raddr := &net.UDPAddr{
 		Port: port,
 		IP:   ip,
@@ -36,9 +36,9 @@ func CreateClientSocket(ip net.IP, port int, p float64, q float64) (net.Conn, er
 		return nil, fmt.Errorf("error dialing to server: %w", err)
 	}
 	markovConn := &MarkovConn{
-		UDPConn: conn,
-		P: p,
-		Q: q,
+		UDPConn:     conn,
+		P:           p,
+		Q:           q,
 		lastDropped: false,
 	}
 	return markovConn, nil

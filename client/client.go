@@ -347,7 +347,7 @@ func getMissingChunks(conn net.Conn, metadata *fileMetadata, conf *ClientConfig)
 		raw := buf[:n]
 		response, err := messages.ParseServer(&raw)
 		if err != nil {
-			metadata.stats.invalid ++
+			metadata.stats.invalid++
 			if errors.Is(err, new(messages.UnsupporedVersionError)) {
 				// We can't do anything if we don't speak the same language
 				return fmt.Errorf("parse server message: %w", err)
@@ -365,7 +365,7 @@ func getMissingChunks(conn net.Conn, metadata *fileMetadata, conf *ClientConfig)
 			header := response.(messages.ServerHeader)
 			if header.Number != acr.Header.Number {
 				// Ignore it
-				metadata.stats.invalid ++
+				metadata.stats.invalid++
 				conf.DebugLogger.Printf("Received response with wrong message number(%d instead of %d). Dropped\n", header.Number, acr.Header.Number)
 				continue
 			}
@@ -386,7 +386,7 @@ func getMissingChunks(conn net.Conn, metadata *fileMetadata, conf *ClientConfig)
 					// Our mistake... Let's throw an error to investigate
 					return fmt.Errorf("malformed ACR: we requested %d chunks in an ACR. Max is %d. (%v)", n_cr, metadata.maxChunksInACR, acr)
 				} else {
-					metadata.stats.invalid ++
+					metadata.stats.invalid++
 					conf.WarnLogger.Printf("Received TooManyChunks error for ACR %v. MaxChunksInACR=%d; # of chunks in ACR:%d. Ignored...\n", acr, metadata.maxChunksInACR, n_cr)
 					continue
 				}
@@ -398,7 +398,7 @@ func getMissingChunks(conn net.Conn, metadata *fileMetadata, conf *ClientConfig)
 						return fmt.Errorf("malformed ACR: we sent a CR with length 0. (%v)", acr)
 					}
 				}
-				metadata.stats.invalid ++
+				metadata.stats.invalid++
 				conf.WarnLogger.Printf("Received ZeroLengthCR error for ACR %v. Ignored.\n", acr)
 				continue
 			default:
@@ -416,7 +416,7 @@ func getMissingChunks(conn net.Conn, metadata *fileMetadata, conf *ClientConfig)
 			crr := response.(messages.CRR)
 			if crr.Header.Number != acr.Header.Number {
 				// This message is not for us. Ignore it
-				metadata.stats.late ++
+				metadata.stats.late++
 				conf.DebugLogger.Printf("Received response with wrong message number(%d instead of %d). Dropped\n", crr.Header.Number, acr.Header.Number)
 				continue
 			}
@@ -431,7 +431,7 @@ func getMissingChunks(conn net.Conn, metadata *fileMetadata, conf *ClientConfig)
 			}
 			if chunkIndexInACR == -1 {
 				// This is not a chunk we requested. Ignore it.
-				metadata.stats.invalid ++
+				metadata.stats.invalid++
 				conf.InfoLogger.Printf("Received CRR for unrequested chunk %d. (The requested chunks are %v). Dropped.\n", chunkNumber, requested)
 				continue
 			}
@@ -446,7 +446,7 @@ func getMissingChunks(conn net.Conn, metadata *fileMetadata, conf *ClientConfig)
 					// That's our fault. Let's throw an error to investigate
 					return fmt.Errorf("malformed ACR: we requested chunk #%d for a file of size %d (%v)", chunkNumber, metadata.fileSize, acr)
 				} else {
-					metadata.stats.invalid ++
+					metadata.stats.invalid++
 					conf.WarnLogger.Printf("Received ChunkOutOfBounds error for chunk #%d in file of size %d. (%v)\n", chunkNumber, metadata.fileSize, acr)
 					continue
 				}
@@ -466,7 +466,7 @@ func getMissingChunks(conn net.Conn, metadata *fileMetadata, conf *ClientConfig)
 			}
 		default:
 			// Ignore irrelevant messages
-			metadata.stats.received ++
+			metadata.stats.received++
 			conf.WarnLogger.Printf("Received unexpected response type to ACR: %T. Dropped...\n", response)
 			continue
 		}
