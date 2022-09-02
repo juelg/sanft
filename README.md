@@ -11,7 +11,7 @@ go build
 ```
 You will now find a new executable called `sanft`. Checkout its command line options by using
 ```shell
-sanft --help
+./sanft --help
 ```
 
 ## Usage
