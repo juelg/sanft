@@ -34,7 +34,7 @@ type ClientConfig struct {
 
 var DefaultConfig = ClientConfig{
 	RetransmissionsMDR: 5,
-	InitialPacketRate:  30,
+	InitialPacketRate:  256,
 	NCRRsToWait:        3,
 	MinTimeout:         500*time.Millisecond,
 	MarkovP:            0,

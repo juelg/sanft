@@ -21,7 +21,7 @@ var (
 	fileDir        = kingpin.Flag("file-dir", "Server: Specify the directory containing the files that the server should serve. Client: Specify the directory where the requested files will be saved").Short('d').Default("./").ExistingDir()
 	chunkSize      = kingpin.Flag("chunk-size", "The chunk size advertised and used by the server.").Default("4048").Int()
 	maxChunksInACR = kingpin.Flag("max-chunks-in-acr", "The maximum number of chunks in an ACR allowed by the server.").Default("128").Int()
-	rateIncrease   = kingpin.Flag("rate-increase", "Amount that the server sending rate should be increased in packet per second.").Default("1").Float64()
+	rateIncrease   = kingpin.Flag("rate-increase", "Amount that the server sending rate should be increased in packet per second.").Default("256").Float64()
 	files          = kingpin.Arg("files", "The name of the file(s) to fetch.").Default("").Strings()
 )
 
