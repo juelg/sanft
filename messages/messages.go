@@ -34,14 +34,16 @@ const (
 
 func Int2uint8_6_arr(a uint64) *[6]uint8 {
 	b := make([]uint8, 8)
-	binary.LittleEndian.PutUint64(b, a)
-	return (*[6]uint8)(b[:6])
+	binary.BigEndian.PutUint64(b, a)
+	// use only the back as we are dealing with big endian
+	return (*[6]uint8)(b[2:8])
 }
 
 func Uint8_6_arr2Int(d [6]uint8) uint64 {
 	b := make([]uint8, 8)
-	copy(b[:6], d[:])
-	return binary.LittleEndian.Uint64(b)
+	// copy to back as we are dealing with big endian
+	copy(b[2:8], d[:])
+	return binary.BigEndian.Uint64(b)
 }
 
 func EmptyToken() *[32]uint8 {
