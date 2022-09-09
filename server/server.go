@@ -107,7 +107,7 @@ func (s *Server) NewKey() {
 
 // the only purpose of the channel is to tell the function
 // when to stop listening
-func (s *Server) Listen(close chan bool) error {
+func (s *Server) Listen(close chan bool) {
 
 	for cont(close) {
 		// short timeout to be responsive
@@ -117,7 +117,8 @@ func (s *Server) Listen(close chan bool) error {
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("error while receiving form UDP socket: %w", err)
+			log.Printf("error while receiving form UDP socket: %v\n", err)
+			continue
 		}
 		msgr, err := messages.ParseClient(&data)
 
@@ -139,7 +140,8 @@ func (s *Server) Listen(close chan bool) error {
 		}
 
 		if err != nil {
-			return fmt.Errorf("error while parsing client message: %w", err)
+			log.Printf("error while parsing client message: %v\n", err)
+			continue
 		}
 
 		switch msg := msgr.(type) {
@@ -150,7 +152,6 @@ func (s *Server) Listen(close chan bool) error {
 		}
 
 	}
-	return nil
 }
 
 func (s *Server) GetPath(path string) string {
