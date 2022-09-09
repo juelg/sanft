@@ -67,11 +67,11 @@ In addition to these 4 rather specific packages, the general `main` package ties
 provides the implementation of the CLI.
 
 ### Which were the major implementation issues?
-To our surprise, most of the implementation went rather smoothly. However, inevitably, there were some minor
-inconveniences, albeit none which proved to be significant hurdles or impediments.
-This is probably due to our intensive practice of using test cases where ever possible.
-Every package except the main package comes with its own test cases.
+To our surprise, most of the implementation went rather smoothly. This is probably due to our intensive practice of
+using test cases where ever possible. Every package except the main package comes with its own test cases.
 Thus, most of the bugs could already be addressed during development and when we tested the interoperability of client and server it worked immediately with almost not problems.
+
+However, inevitably, there were some minor inconveniences, albeit none which proved to be significant hurdles or impediments.
 
 Firstly, when writing a protocol specification, 48 bit sized fields might seem like a good (or at least innocuous) idea;
 however, when implementing a protocol, 48 bit sized fields quickly become an encumbrance, since there is no data type
@@ -88,7 +88,8 @@ by no means obvious which configuration would be a good default suitable for all
 congestion control algorithm does not include a multiplicative increase phase akin to TCP slow start which can quickly
 bump up the packet rate on a new transfer, it would often be desirable to use a high value for the rate increase
 parameter.  However, if the file being transferred is rather large, this might slow down the transfer in the long run
-as it is more likely to cause congestion.
+as it is more likely to cause congestion. In the end, we settled on a set of slightly more conservative values that
+proved to be beneficial in the circumstances under which we tested our implementation.
 
 Another thing we noticed is that sometimes our specification did not account for certain edge cases, which we will
 discuss in the next subsection.
@@ -103,7 +104,7 @@ very small ACR, we decided to address this edge case by using another formula wh
 a packetRate from the (estimated) times of arrivals, the new packetRate is computed as the previous packetRate multiplied
 by the number of received chunks over the number of expected chunks.
 
-On the server side we realized that in the Chunk Request Response for the "Too Many Chunks" error it is not specified if the server has to check first for this error and do not answer any of Chunk Requests or if the server has to process all chunks previous to the chunk which results in the error. We decided to answer all previous Chunk Requests and only answer with the error once it occurs in the answering loop instead of checking for the error before hand and don't answer any requests.
+On the server side we realized that in the Chunk Request Response for the "Too Many Chunks" error it is not specified if the server has to check first for this error and do not answer any of Chunk Requests or if the server has to process all chunks previous to the chunk which results in the error. We decided to answer all previous Chunk Requests and only answer with the error once it occurs in the answering loop instead of checking for the error beforehand and not answering any requests.
 Furthermore, the protocol does not specify any error if the file is larger than the maximal specified size according to the number of chunks. In that case we decided to answer any MDR with a "File Not Found" error as it is impossible to serve the file.
 
 ### What would you do differently if you started all over again?
