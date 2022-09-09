@@ -43,8 +43,19 @@ set the number of packets per second that the server which the server adds to th
 by the client, and the `--max-chunks-in-acr` flag pertaining to the maximum permitted number of Chunk Requests
 in a single ACR, advertised by the server in the Metadata Request Response.
 
+### Examples
+Start a simple server on localhost IP 127.0.0.1 with UDP port listening on 9999 and serving from
+folder `srv` (relative to current directory)
+```shell
+./sanft -s 127.0.0.1 -t 9999 -d srv
+```
+To start a simple client which requests file `test.txt` in `srv` on the server use the following command:
+```shell
+./sanft 127.0.0.1 -t 9999 test.txt
+```
+
 ## Tests
-Every package except the main one has tests. In order to run theses tests cd into the repsective package and run `go test`.
+Every package except the main one has tests. In order to run theses tests cd into the respective package and run `go test`.
 
 ## Assignment Task: Briefly record what you did and what you learned
 ### How is your program structured?
@@ -58,9 +69,9 @@ provides the implementation of the CLI.
 ### Which were the major implementation issues?
 To our surprise, most of the implementation went rather smoothly. However, inevitably, there were some minor
 inconveniences, albeit none which proved to be significant hurdles or impediments.
-This is probably due to our intensitve particice of using test cases whereever possible.
-Every package excpet the main package comes with its own test cases.
-Thus, most of the bugs could already be addressed during development and when we tested the interoperablility of client and server it worked immeditatly with almost not problems.
+This is probably due to our intensive practice of using test cases where ever possible.
+Every package except the main package comes with its own test cases.
+Thus, most of the bugs could already be addressed during development and when we tested the interoperability of client and server it worked immediately with almost not problems.
 
 Firstly, when writing a protocol specification, 48 bit sized fields might seem like a good (or at least innocuous) idea;
 however, when implementing a protocol, 48 bit sized fields quickly become an encumbrance, since there is no data type
@@ -93,6 +104,7 @@ a packetRate from the (estimated) times of arrivals, the new packetRate is compu
 by the number of received chunks over the number of expected chunks.
 
 On the server side we realized that in the Chunk Request Response for the "Too Many Chunks" error it is not specified if the server has to check first for this error and do not answer any of Chunk Requests or if the server has to process all chunks previous to the chunk which results in the error. We decided to answer all previous Chunk Requests and only answer with the error once it occurs in the answering loop instead of checking for the error before hand and don't answer any requests.
+Furthermore, the protocol does not specify any error if the file is larger than the maximal specified size according to the number of chunks. In that case we decided to answer any MDR with a "File Not Found" error as it is impossible to serve the file.
 
 ### What would you do differently if you started all over again?
 * No 48 bit field sizes!
