@@ -17,9 +17,10 @@ import (
 
 type ClientConfig struct {
 	// Implementation specific values for SANFT
-	RetransmissionsMDR int    // Max number of retransmissions when sending an MDR
-	InitialPacketRate  uint32 // Initial packet rate in pkt/s
-	NCRRsToWait        int    // Number of virtual CRR to wait for the next CRR to arrive
+	RetransmissionsMDR int           // Max number of retransmissions when sending an MDR
+	InitialPacketRate  uint32        // Initial packet rate in pkt/s
+	NCRRsToWait        int           // Number of virtual CRR to wait for the next CRR to arrive
+	MinTimeout         time.Duration // Minimum value that timeout can take
 
 	// Markov simulation of packet loss
 	MarkovP float64 // Probability of losing packet n+1 if n was not lost
@@ -35,6 +36,7 @@ var DefaultConfig = ClientConfig{
 	RetransmissionsMDR: 5,
 	InitialPacketRate:  30,
 	NCRRsToWait:        3,
+	MinTimeout:         500*time.Millisecond,
 	MarkovP:            0,
 	MarkovQ:            0,
 	DebugLogger:        log.New(ioutil.Discard, "DEBUG: ", log.LstdFlags),
@@ -123,7 +125,7 @@ func RequestFile(ip net.IP, port int, URI string, localFilename string, conf *Cl
 			os.Remove(localFilename)
 			return fmt.Errorf("get missing chunks: %w", err)
 		}
-		fmt.Printf("%s(0x%x): %d/%d chunks (%dchunks/s); req:%d;invalid:%d;late:%d\r", metadata.url, metadata.fileID, metadata.stats.received, metadata.fileSize, metadata.packetRate, metadata.stats.requested, metadata.stats.invalid, metadata.stats.late)
+		fmt.Printf("%s(0x%x): %d/%d chunks (%dchunks/s); req:%d;invalid:%d;late:%d  \r", metadata.url, metadata.fileID, metadata.stats.received, metadata.fileSize, metadata.packetRate, metadata.stats.requested, metadata.stats.invalid, metadata.stats.late)
 	}
 	fmt.Println()
 	localFile.Close()
@@ -259,7 +261,12 @@ retransmit:
 				if err != nil {
 					return fmt.Errorf("invalid metadata: %w", err)
 				}
-				metadata.timeout = time.Since(t_send) * time.Duration(rtt2timeoutFactor) // Sorry to all the physicists who will see this; go only accepts to multiply values of the same type
+				rtt := time.Since(t_send) 
+				if 2*rtt < conf.MinTimeout {
+					metadata.timeout = conf.MinTimeout
+				} else {
+					metadata.timeout = rtt * time.Duration(rtt2timeoutFactor) // Sorry to all the physicists who will see this; go only accepts to multiply values of the same type
+				}
 
 				if metadata.chunkMap == nil || metadata.fileID != oldFileID {
 					// Erase the old file
@@ -453,7 +460,12 @@ func getMissingChunks(conn net.Conn, metadata *fileMetadata, conf *ClientConfig)
 			}
 			if !received {
 				// If it's the first CRR we receive, update RTT
-				metadata.timeout = time.Now().Sub(t_send) * time.Duration(rtt2timeoutFactor)
+				rtt := time.Since(t_send) 
+				if 2*rtt < conf.MinTimeout {
+					metadata.timeout = conf.MinTimeout
+				} else {
+					metadata.timeout = rtt * time.Duration(rtt2timeoutFactor)
+				}
 				received = true
 			}
 			mapTimeCRRs[chunkIndexInACR] = t_recv
