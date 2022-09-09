@@ -21,6 +21,7 @@ import (
 var testConfig = ClientConfig{
 	RetransmissionsMDR: 3,
 	InitialPacketRate:  40,
+	MinTimeout:         1*time.Second,
 	NCRRsToWait:        3,
 	MarkovP:            0,
 	MarkovQ:            0,
