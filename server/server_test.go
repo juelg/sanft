@@ -471,4 +471,30 @@ func TestACR(t *testing.T) {
 	_, ok = s.FileIDMap[fileid]
 	assert.False(t, ok, "file id should now be deleted from server map")
 
+
+	// test key validity
+
+	s.valid_until = time.Now().Add(-time.Second)
+
+	crlist = make([]messages.CR, 1)
+	crlist[0] = messages.CR{ChunkOffset: *messages.Int2uint8_6_arr(0), Length: 1}
+
+	msgacr = messages.GetACR(1, &token, fileid, 1, &crlist)
+	msgacr.Send(c)
+
+	msgr, err = messages.ClientReceive(c, 10000)
+	if err != nil {
+		t.Fatalf(`Client Receive failed: %v`, err)
+	}
+	parsed, err = messages.ParseServer(&msgr)
+	if err != nil {
+		t.Fatalf(`parse failed: %v`, err)
+	}
+	// should be NTM message
+	ntm = parsed.(messages.NTM)
+	assert.Equal(t, ntm.Header.Number, msgacr.Header.Number, "Header number should match")
+	assert.Equal(t, ntm.Header.Version, messages.VERS, "Returned wrong version")
+	assert.Equal(t, ntm.Header.Error, messages.NoError, "There should be no error type set")
+	assert.NotEqual(t, ntm.Token, token, "token should not match the previous")
+
 }

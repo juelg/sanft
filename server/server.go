@@ -18,6 +18,8 @@ import (
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 )
 
+const KEY_VALIDITY = 12 * time.Hour
+
 type FileM struct {
 	Path string
 	T    time.Time
@@ -38,7 +40,8 @@ type Server struct {
 	FileIDMap map[uint32]FileM
 
 	// keying material
-	key []uint8
+	key         []uint8
+	valid_until time.Time
 
 	// constant packet rate increase
 	RateIncrease float64
@@ -101,6 +104,13 @@ func Init(ip net.IP, port int, root_dir string, chunk_size uint16, max_chunks_in
 
 func (s *Server) NewKey() {
 	s.key = createRandomKey()
+	s.valid_until = time.Now().Add(KEY_VALIDITY)
+}
+
+func (s *Server) RefreshKey() {
+	if time.Now().After(s.valid_until) {
+		s.NewKey()
+	}
 }
 
 // server methods
@@ -110,6 +120,9 @@ func (s *Server) NewKey() {
 func (s *Server) Listen(close chan bool) {
 
 	for cont(close) {
+		// refreshing key every 12 hours
+		s.RefreshKey()
+
 		// short timeout to be responsive
 		addr, data, err := messages.ServerReceive(s.Conn, 100)
 		if os.IsTimeout(err) {
