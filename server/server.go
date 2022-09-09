@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"math"
 	"net"
@@ -45,6 +46,11 @@ type Server struct {
 
 	// constant packet rate increase
 	RateIncrease float64
+
+	// Debugging
+	DebugLogger *log.Logger
+	InfoLogger  *log.Logger
+	WarnLogger  *log.Logger
 }
 
 func createRandomKey() []uint8 {
@@ -99,6 +105,11 @@ func Init(ip net.IP, port int, root_dir string, chunk_size uint16, max_chunks_in
 	s.NewKey()
 	s.RateIncrease = rate_increase
 
+	// logger
+	s.DebugLogger = log.New(ioutil.Discard, "DEBUG: ", log.LstdFlags)
+	s.InfoLogger = log.New(os.Stderr, "INFO: ", log.LstdFlags)
+	s.WarnLogger = log.New(os.Stderr, "WARN: ", log.LstdFlags)
+
 	return s, nil
 }
 
@@ -130,7 +141,7 @@ func (s *Server) Listen(close chan bool) {
 			continue
 		}
 		if err != nil {
-			log.Printf("error while receiving form UDP socket: %v\n", err)
+			s.WarnLogger.Printf("error while receiving form UDP socket: %v\n", err)
 			continue
 		}
 		msgr, err := messages.ParseClient(&data)
@@ -141,7 +152,7 @@ func (s *Server) Listen(close chan bool) {
 		var e3 *messages.UnsupporedVersionError
 		if errors.As(err, &e1) && errors.As(err, &e2) {
 			// Invalid request, drop request
-			log.Println("Invalid request, dropped..")
+			s.DebugLogger.Println("Invalid request, dropped...")
 			continue
 		}
 
@@ -153,7 +164,7 @@ func (s *Server) Listen(close chan bool) {
 		}
 
 		if err != nil {
-			log.Printf("error while parsing client message: %v\n", err)
+			s.DebugLogger.Printf("error while parsing client message: %v\n", err)
 			continue
 		}
 
@@ -173,11 +184,11 @@ func (s *Server) GetPath(path string) string {
 
 func (s *Server) handleMDR(msg messages.MDR, addr net.Addr) {
 	// - MDR: check token, (check if file exists) lookup file id (= hash out of path + last modified), filesize, checksum
-	log.Printf("MDR from %v for path %v\n", addr, string(msg.URI))
+	s.InfoLogger.Printf("MDR from %v for path %v\n", addr, string(msg.URI))
 
 	// check token
 	if !s.checkToken(addr, &msg.Header.Token) {
-		log.Printf("Invalid token in MDR of %v, sending new token\n", addr)
+		s.DebugLogger.Printf("Invalid token in MDR of %v, sending new token...\n", addr)
 		s.sendNTM(msg.Header.Number, messages.NoError, addr)
 		return
 	}
@@ -191,7 +202,7 @@ func (s *Server) handleMDR(msg messages.MDR, addr net.Addr) {
 	file, err := os.Stat(filepath)
 	if errors.Is(err, os.ErrNotExist) {
 		// URI does not exist
-		log.Printf("URI does not exits: %v\n", string(msg.URI))
+		s.DebugLogger.Printf("URI does not exits: %v\n", string(msg.URI))
 		msg := messages.ServerHeader{Version: messages.VERS, Type: messages.MDRR_t,
 			Number: msg.Header.Number, Error: messages.FileNotFound}
 		msg.Send(s.Conn, addr)
@@ -204,7 +215,7 @@ func (s *Server) handleMDR(msg messages.MDR, addr net.Addr) {
 	filesize_in_chunks := Ceil(filesize, int64(s.ChunkSize))
 	if filesize_in_chunks > (2<<48)-1 {
 		// file too large, cant serve -> return file not found: Implementation specific
-		log.Printf("File is too large, cant serve: %v\n", string(msg.URI))
+		s.WarnLogger.Printf("File is too large, cant serve: %v\n", string(msg.URI))
 		msg := messages.ServerHeader{Version: messages.VERS, Type: messages.MDRR_t,
 			Number: msg.Header.Number, Error: messages.FileNotFound}
 		msg.Send(s.Conn, addr)
@@ -225,7 +236,7 @@ func (s *Server) handleMDR(msg messages.MDR, addr net.Addr) {
 		lastChanged := file.ModTime()
 		fileid, err = GetFileID(filepath, lastChanged, i)
 		if err != nil {
-			log.Printf("error while getting file id: %v\n", err)
+			s.DebugLogger.Printf("error while getting file id: %v\n", err)
 			return
 		}
 		// check if file id is dict, if yes check if the same file, if no
@@ -245,7 +256,7 @@ func (s *Server) handleMDR(msg messages.MDR, addr net.Addr) {
 		} else {
 			checksum, err = GetFileChecksum(filepath)
 			if err != nil {
-				log.Printf("error while getting file checksum: %v\n", err)
+				s.DebugLogger.Printf("error while getting file checksum: %v\n", err)
 				return
 			}
 			s.FileIDMap[fileid] = FileM{Path: filepath, T: lastChanged, Try: i, Checksum: checksum}
@@ -256,16 +267,16 @@ func (s *Server) handleMDR(msg messages.MDR, addr net.Addr) {
 
 	msgs := messages.GetMDRR(msg.Header.Number, messages.NoError, s.ChunkSize, s.MaxChunksInACR, fileid, *messages.Int2uint8_6_arr(uint64(filesize_in_chunks)), (*[32]uint8)(checksum))
 	if err = msgs.Send(s.Conn, addr); err != nil {
-		log.Printf("error while sending: %v\n", err)
+		s.WarnLogger.Printf("error while sending: %v\n", err)
 	}
 
 }
 
 func (s *Server) handleACR(msg messages.ACR, addr net.Addr) {
 	// - ACR: check token, check file id in dict (what happens if mdr hasnt been send before?), read file chunk and return
-	log.Printf("ACR from %v for id: 0x%x, with rate: %v and %v CRs \n", addr, msg.FileID, msg.PacketRate, len(msg.CRs))
+	s.InfoLogger.Printf("ACR from %v for id: 0x%x, with rate: %v and %v CRs \n", addr, msg.FileID, msg.PacketRate, len(msg.CRs))
 	if !s.checkToken(addr, &msg.Header.Token) {
-		log.Printf("Invalid token in ACR of %v, sending new token\n", addr)
+		s.DebugLogger.Printf("Invalid token in ACR of %v, sending new token\n", addr)
 		s.sendNTM(msg.Header.Number, messages.NoError, addr)
 		return
 	}
@@ -273,7 +284,7 @@ func (s *Server) handleACR(msg messages.ACR, addr net.Addr) {
 	filem, ok := s.FileIDMap[msg.FileID]
 	if !ok {
 		// fileid does not exist (yet)
-		log.Printf("FileID 0x%x does not exist\n", msg.FileID)
+		s.DebugLogger.Printf("FileID 0x%x does not exist\n", msg.FileID)
 		msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
 			Number: msg.Header.Number, Error: messages.InvalidFileID}
 		msg.Send(s.Conn, addr)
@@ -283,7 +294,7 @@ func (s *Server) handleACR(msg messages.ACR, addr net.Addr) {
 	file, err := os.Stat(filem.Path)
 	if errors.Is(err, os.ErrNotExist) || file.ModTime() != filem.T {
 		// file does no longer exist or has been modified
-		log.Printf("FileID %x does no longer exist\n", msg.FileID)
+		s.DebugLogger.Printf("FileID %x does no longer exist\n", msg.FileID)
 		// delete from dict
 		delete(s.FileIDMap, msg.FileID)
 		// send error message
@@ -300,7 +311,7 @@ func (s *Server) handleACR(msg messages.ACR, addr net.Addr) {
 
 	f, err := os.Open(filem.Path)
 	if err != nil {
-		log.Printf("error while opening file: %v\n", err)
+		s.DebugLogger.Printf("error while opening file: %v\n", err)
 		return
 	}
 	defer f.Close()
@@ -323,7 +334,7 @@ func (s *Server) handleACR(msg messages.ACR, addr net.Addr) {
 			amount_chunks++
 			// check too many chunks
 			if amount_chunks > int(s.MaxChunksInACR) {
-				log.Printf("Too many chunks requested by %v\n", addr)
+				s.DebugLogger.Printf("Too many chunks requested by %v\n", addr)
 				msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
 					Number: msg.Header.Number, Error: messages.TooManyChunks}
 				msg.Send(s.Conn, addr)
@@ -332,7 +343,7 @@ func (s *Server) handleACR(msg messages.ACR, addr net.Addr) {
 
 			// check chunk out of bounds
 			if (offset+uint64(j))*uint64(s.ChunkSize) > uint64(file.Size()) {
-				log.Printf("CR %v out of bounds from %v\n", j, addr)
+				s.DebugLogger.Printf("CR %v out of bounds from %v\n", j, addr)
 				zero_data := make([]uint8, 0)
 				msg := messages.GetCRR(msg.Header.Number, messages.ChunkOutOfBounds, *messages.Int2uint8_6_arr(chunk_number), &zero_data)
 				msg.Send(s.Conn, addr)
@@ -341,7 +352,7 @@ func (s *Server) handleACR(msg messages.ACR, addr net.Addr) {
 
 			// check zero length
 			if i.Length == 0 {
-				log.Printf("CR %v has zero length from %v\n", j, addr)
+				s.DebugLogger.Printf("CR %v has zero length from %v\n", j, addr)
 				msg := messages.ServerHeader{Version: messages.VERS, Type: messages.CRR_t,
 					Number: msg.Header.Number, Error: messages.ZeroLengthCR}
 				msg.Send(s.Conn, addr)
@@ -352,7 +363,7 @@ func (s *Server) handleACR(msg messages.ACR, addr net.Addr) {
 			buf := make([]uint8, s.ChunkSize)
 			n, err := f.Read(buf)
 			if err != nil {
-				log.Printf("error while reading from the file: %v\n", err)
+				s.WarnLogger.Printf("error while reading from the file: %v\n", err)
 				continue
 			}
 			// send the read bytes
