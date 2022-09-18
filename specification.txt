@@ -1,0 +1,835 @@
+
+
+
+
+Group 0+3                                                     M. Gruhlke
+Internet-Draft                                                 R. Haddad
+Intended status: Informational                                D. Semerak
+Expires: 8 January 2023                                          T. Jülg
+                                                                  G. Roy
+                                                               S. Kappes
+                                                                     TUM
+                                                             7 July 2022
+
+
+         Stateless Amplification Negating File Transfer (SANFT)
+                             draft-SANFT-00
+
+Abstract
+
+   This document specifies the Stateless Amplification Negating File
+   Transfer Protocol (SANFT), a protocol that allows clients to download
+   files from servers.
+
+Status of This Memo
+
+   This Internet-Draft is submitted in full conformance with the
+   provisions of BCP 78 and BCP 79.
+
+   Internet-Drafts are working documents of the Internet Engineering
+   Task Force (IETF).  Note that other groups may also distribute
+   working documents as Internet-Drafts.  The list of current Internet-
+   Drafts is at https://datatracker.ietf.org/drafts/current/.
+
+   Internet-Drafts are draft documents valid for a maximum of six months
+   and may be updated, replaced, or obsoleted by other documents at any
+   time.  It is inappropriate to use Internet-Drafts as reference
+   material or to cite them other than as "work in progress."
+
+   This Internet-Draft will expire on 8 January 2023.
+
+Copyright Notice
+
+   Copyright (c) 2022 IETF Trust and the persons identified as the
+   document authors.  All rights reserved.
+
+
+
+
+
+
+
+
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                 [Page 1]
+
+Internet-Draft                    SANFT                        July 2022
+
+
+   This document is subject to BCP 78 and the IETF Trust's Legal
+   Provisions Relating to IETF Documents (https://trustee.ietf.org/
+   license-info) in effect on the date of publication of this document.
+   Please review these documents carefully, as they describe your rights
+   and restrictions with respect to this document.  Code Components
+   extracted from this document must include Revised BSD License text as
+   described in Section 4.e of the Trust Legal Provisions and are
+   provided without warranty as described in the Revised BSD License.
+
+Table of Contents
+
+   1.  Introduction  . . . . . . . . . . . . . . . . . . . . . . . .   2
+     1.1.  Conventions and Terminology . . . . . . . . . . . . . . .   3
+   2.  SANFT . . . . . . . . . . . . . . . . . . . . . . . . . . . .   3
+     2.1.  Overview  . . . . . . . . . . . . . . . . . . . . . . . .   3
+     2.2.  Header  . . . . . . . . . . . . . . . . . . . . . . . . .   3
+     2.3.  New Token Message (NTM) . . . . . . . . . . . . . . . . .   5
+     2.4.  Metadata Request (MDR)  . . . . . . . . . . . . . . . . .   6
+     2.5.  Metadata Request Response (MDRR)  . . . . . . . . . . . .   6
+     2.6.  Chunk Request (CR) and Aggregate Chunk Request (ACR)  . .   7
+     2.7.  Chunk Request Response (CRR)  . . . . . . . . . . . . . .   8
+   3.  Measurements  . . . . . . . . . . . . . . . . . . . . . . . .  10
+   4.  Loss Detection  . . . . . . . . . . . . . . . . . . . . . . .  11
+     4.1.  Client gets no CRR at all from the server . . . . . . . .  11
+     4.2.  Client gets at least one CRR  . . . . . . . . . . . . . .  11
+   5.  Congestion Control  . . . . . . . . . . . . . . . . . . . . .  12
+   6.  Flow Control  . . . . . . . . . . . . . . . . . . . . . . . .  12
+     6.1.  Client Side Flow Control  . . . . . . . . . . . . . . . .  12
+     6.2.  Server Side Flow Control  . . . . . . . . . . . . . . . .  13
+   7.  General Considerations  . . . . . . . . . . . . . . . . . . .  13
+     7.1.  Checksum verification . . . . . . . . . . . . . . . . . .  13
+     7.2.  File change . . . . . . . . . . . . . . . . . . . . . . .  13
+     7.3.  File deletion . . . . . . . . . . . . . . . . . . . . . .  13
+     7.4.  Connection migration  . . . . . . . . . . . . . . . . . .  14
+     7.5.  Connection drop . . . . . . . . . . . . . . . . . . . . .  14
+   8.  Normative References  . . . . . . . . . . . . . . . . . . . .  14
+   Authors' Addresses  . . . . . . . . . . . . . . . . . . . . . . .  14
+
+1.  Introduction
+
+   Contrary to other file transfer protocols, in SANFT, clients can
+   request arbitrary portions of files from the server at their own
+   leisure.  This eliminates the concept of connections, making it the
+   client's responsibility to properly request and assemble files while
+   freeing the server from the burden of keeping state.  It is hence a
+   rather simple and flexible protocol, defining only a minimum set of
+   functionality to ensure the seamless interaction of all participants.
+
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                 [Page 2]
+
+Internet-Draft                    SANFT                        July 2022
+
+
+1.1.  Conventions and Terminology
+
+   The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT",
+   "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this
+   document are to be interpreted as described in RFC 2119 [RFC2119].
+
+2.  SANFT
+
+2.1.  Overview
+
+   SANFT messages are sent in User Datagram Protocol packets [RFC0768].
+
+   If a client wants to download a file from a server using SANFT, it
+   usually starts by sending a Metadata Request (MDR) containing the
+   name of the requested file to the server.  The server answers this
+   request with a Metadata Request Response (MDRR) that contains general
+   information about the file such as the file size, a unique file
+   identifier, and a checksum of the file.
+
+   After obtaining these data from the server, the client can proceed to
+   request individual portions of the file by sending
+   Chunk Requests (CRs) to the server, which the server will answer with
+   Chunk Request Responses (CRRs) containing the respective part of the
+   file.
+
+   Once the client has obtained the entire file, it MUST verify that the
+   transfer was successful by computing the checksum.
+
+   Since SANFT is a stateless protocol, the responses sent by the server
+   (MDRR and CRR) will generally echo a client-chosen number field from
+   the header of the corresponding request by the client (MDR or ACR) to
+   indicate which request is being answered.
+
+2.2.  Header
+
+   Each SANFT message starts with a header.  Messages sent by the client
+   (MDR and ACR) start with a client header, while messages sent by the
+   server (MDRR and CRR) start with a server header.
+
+
+
+
+
+
+
+
+
+
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                 [Page 3]
+
+Internet-Draft                    SANFT                        July 2022
+
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |    Version    |       Type    |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |     Number    |               |
+   +-+-+-+-+-+-+-+-+               +
+   /          Token (256b)         /
+   /                               /
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                       Figure 1: Client Header Format
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |   Version     |      Type     |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |    Number     |      Error    |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                       Figure 2: Server Header Format
+
+   The headers contain the following fields:
+
+   Version  The version of the protocol.  For this specification, the
+      version field MUST be set to zero.
+
+   Type  The message type, according to the following mapping:
+
+      0 - New Token Message (NTM)
+      1 - Metadata Request (MDR)
+      2 - Metadata Request Response (MDRR)
+      3 - Agregate Chunk Request (ACR)
+      4 - Chunk Request Response (CRR)
+
+   Number  Whenever the client sends a request to the server, the client
+      sets the Number field to a freely-chosen value.  When the server
+      responds to a respective request, it MUST set the number field in
+      its response to the value specified in the client request that
+      prompted the response so that the client may identify the request
+      which the responds answers.
+
+   Token  A client MUST include a token, which was received from the
+      server earlier (see Section 2.3).  If the client does not have a
+      token, then the client MUST include a arbitrary value.
+
+   Error  An error code.  Error codes are defined per message type.  If
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                 [Page 4]
+
+Internet-Draft                    SANFT                        July 2022
+
+
+      no error occurred, this field MUST be set to zero.
+
+2.3.  New Token Message (NTM)
+
+   To protect against misuse of the system via address spoofing, the
+   server MUST generate a 256-bit token based on the client's IP address
+   and port number, which the client MUST include in every request.  The
+   client obtains a valid token from the server by making a request with
+   an invalid token (i.e. an arbitrary value).  Once the server receives
+   an invalid token from the client, it responds with a New Token
+   Message (NTM).  The sever MUST NOT send any responses apart from the
+   NTM when receiving a request with an invalid token.  Token generation
+   is left open to the server implementation, since the client simply
+   has to include a copy of the token in requests but does not have to
+   decipher it.  For example, the token MAY be the HMAC of the IP
+   address and port number of the client.  If the server changes any
+   keys used to generate the token, future requests based on the old key
+   will be invalid, and thus clients will receive updated tokens
+   automatically after their next request.  If the client changes IP
+   addresses, the token will be invalid and thus the client will receive
+   a new token which is valid for the new IP address from the server
+   (see Section 7.4 for more details).
+
+   The server SHOULD replace any keys used for token generation every 12
+   hours to improve security.
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   /         Token (256b)          /
+   /                               /
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                     Figure 3: New Token Message Format
+
+   The NTM consists of the following field:
+
+   Token  The 256 bit field for the token, which is generated by the
+      server.  The client MUST include it in the subsequent message
+      headers.
+
+   Whenever the client receives a New Token Message it MUST use the new
+   token for all following requests until another NTM is received from
+   the server.
+
+
+
+
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                 [Page 5]
+
+Internet-Draft                    SANFT                        July 2022
+
+
+2.4.  Metadata Request (MDR)
+
+   The client can request information about a file from the server via a
+   Metadata Request (MDR).
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   /           File URI            /
+   /                               /
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                     Figure 4: Metadata Request Format
+
+   The MDR consists of the following fields:
+
+   File URI  The UTF-8 encoded Uniform Resource Identifier (URI)
+      [RFC3986] of the file.  This is a variable length field, which
+      MUST be longer than zero.
+
+2.5.  Metadata Request Response (MDRR)
+
+   Upon receiving a Metadata Request from the client, the server SHOULD
+   respond with a corresponding Metadata Request Response (MDRR).
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |           Chunk Size          |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |        Max Chunks in ACR      |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |             File ID           |
+   |                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |            File Size          |
+   |                               |
+   |                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   /        Checksum (256b)        /
+   /                               /
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                 Figure 5: Metadata Request Response Format
+
+   The MDRR contains the following fields:
+
+   Chunk Size  The server-specific size of a chunk in octets.  This MUST
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                 [Page 6]
+
+Internet-Draft                    SANFT                        July 2022
+
+
+      be larger than 0 and MUST NOT be larger than 65,517.
+
+   Max Chunks in ACR  The maximum number of chunks the client may
+      request in a single ACR (see Section 2.6).
+
+   File ID  A unique numeric value specific to the file which the
+      response describes.
+
+   File Size  The size of the file in chunks.
+
+   Checksum  A binary SHA265 checksum of data in the file.
+
+   The server MUST respond with the following error codes in the header
+   if the corresponding conditions apply:
+
+   1 - Unsupported Version  The server does not support the protocol
+      version specified in the client's request.  In this case, the
+      server MUST set the version field in its response to the highest
+      version it supports.
+   2 - File Not Found  The server does not provide any file with the
+      given filename.
+
+   If more than one of the above conditions apply, the server MUST
+   respond with the lowest applicable error number.  When responding
+   with an error, the server MUST omit all fields in the MDRR that are
+   not part of the header.
+
+2.6.  Chunk Request (CR) and Aggregate Chunk Request (ACR)
+
+   The client MAY request portions of a file by sending a Chunk Request
+   (CR) to the server.
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |          Chunk Offset         |
+   |                               |
+   |                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |    Length     |
+   +-+-+-+-+-+-+-+-+
+
+                       Figure 6: Chunk Request Format
+
+   The CR contains the following fields:
+
+   Offset  The position of the first requested chunk in the file (i.e.
+      the number of the first chunk).
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                 [Page 7]
+
+Internet-Draft                    SANFT                        July 2022
+
+
+   Length  The number of consecutive chunks requested (starting from the
+      first chunk).  This field MUST NOT be zero.
+
+   CRs are always embedded in Aggregate Chunk Requests (ACRs).  Each ACR
+   can hold any number of CRs between one and the value specified in the
+   Max Chunks in ACR field of the MDRR.
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |            File ID            |
+   |                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |          Packet Rate          |
+   |                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   /             CR 1              /
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   /             CR 2              /
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   /              ...              /
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   /             CR n              /
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                  Figure 7: Aggregate Chunk Request Format
+
+   The ACR contains the following fields:
+
+   File ID  The File ID of the file to which the enclosed Chunk Requests
+      pertain as indicted by the server in the MDRR.
+
+   Packet Rate  The Packet Rate measured by the client in packets per
+      second (see Section 5).
+
+2.7.  Chunk Request Response (CRR)
+
+   Upon receiving a CR from the client, the server SHOULD respond with a
+   corresponding Chunk Request Response (CRR).  When answering a ACR,
+   the server MUST answer the individual CRs in the order in which they
+   appear in the ACR.
+
+
+
+
+
+
+
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                 [Page 8]
+
+Internet-Draft                    SANFT                        July 2022
+
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |          Chunk Number         |
+   |                               |
+   |                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   /              Data             /
+   /                               /
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                  Figure 8: Chunk Request Response Format
+
+   The CRR contains the following fields:
+
+   Chunk Number  The number of the chunk in the file which the client
+      requested.
+
+   Data  The data contained in the corresponding chunk.  The size of
+      this field is equal to the chunk size specified in the MDRR,
+      unless the server is answering a request for the last chunk in the
+      file, which may be smaller if the overall file size is not a
+      multiple of the chunk size.
+
+   The server MUST respond with the following errors codes in the header
+   if the corresponding conditions apply:
+
+   1 - Unsupported Version  The server does not support the protocol
+      version specified in the client's request.  In this case, the
+      server MUST set the version field in its response to the next
+      lower version it supports.
+   2 - Invalid File ID  There is currently no file on the server that is
+      associated with the File ID sent by the client.
+   3 - Too Many Chunks  The number of requested chunks in the ACR
+      exceeds the value specified in the Max Chunks in ACR of the MDRR.
+   4 - Chunk Out of Bounds  The chunk requested by the client is not
+      within the file.
+   5 - Zero length  The length field in the CR contains a zero value.
+
+   If more than one of the above conditions apply, the server MUST
+   respond with the lowest applicable error number.  When responding
+   with an error, the server MUST omit all fields in the CRR that are
+   not part of the header, with the exception of the Chunk Out of Bounds
+   ?
+   error (4), where only the Data field MUST be omitted, while the Chunk
+   Number field MUST NOT be omitted.
+
+
+
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                 [Page 9]
+
+Internet-Draft                    SANFT                        July 2022
+
+
+   If only errors 4 or 5 apply, the server SHOULD continue to process
+   the remaining CRs in the ACR.  On the other hand, if any of the
+   errors 1-3 apply, the server MUST NOT respond to any of the remaining
+   CRs in the ACR after sending the error.
+
+3.  Measurements
+
+   The client takes two measurements -- Response Time and Packet Rate --
+   during the transfer process, which are used for loss detection
+   (Section 4) and congestion control (Section 5).
+
+   The Response Time (RT) is the time between sending the request and
+   receiving the first message of the response.  For the ACR, where one
+   request leads to many response messages, the time to the first
+   received related response is measured.  The client MUST record the
+   Response Time for every successful request it sends.
+
+   The Packet Rate is the number of packets per second that the server
+   will try to send at.  It is measured over the time of one ACR
+   response, meaning the block of CRRs send by the server following an
+   ACR.  The Packet Rate is an average over the entire response,
+   specifically the number of packets received divided by the time
+   between the first and the last message (n/delta_t).  (The inverse of
+   this would be the average time between packets.)
+
+   Since the Packet Rate is based on the first and the last message of
+   the block (which are known by both parties as the server answers CRs
+   in the order in which they appear in the ACR) the client MUST
+   estimate their expected arrival time based on the requested rate if
+   these packets are lost.  These estimations are based on the smallest/
+   highest message received (based on the ordering in the corresponding
+   ACR) and can be calculated as follows:
+
+   time_estimated_first = time(smallest) - (smallest - 1) / rate
+
+   time_estimated_last = time(highest) + (#CR - highest) / rate
+
+   where :
+
+   *  rate is the value of the Packet Rate field sent in the ACR;
+
+   *  smallest (resp. highest) is the index of the CRR with the smallest
+      (resp. highest) index that was received, the index of the first CR
+      in the ACR being 1;
+
+   *  time(smallest) (resp. time(highest)) is the time at which the CRR
+      with the smallest (resp. highest) index was received;
+
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                [Page 10]
+
+Internet-Draft                    SANFT                        July 2022
+
+
+   *  #CR is the number of CRs in the ACR;
+
+   *  time_estimated_first (resp. time_estimated_last) is the estimated
+      time of arrival of the response to the first (resp. last) CR in
+      the ACR.
+
+4.  Loss Detection
+
+   There are two possible ways how loss can occur in our system.  Either
+   the client receives no response at all or out of the multitude of
+   responses to the ACR a few are missing.
+
+4.1.  Client gets no CRR at all from the server
+
+   The client can assume now its request has gotten lost.  This case is
+   detected with a timeout which is either two times the Response Time
+   or 3 seconds; the latter being the case if the RT has not been
+   measured yet, for example in the first request.  After the timeout
+   the client SHOULD retransmit the request.  This timeout is further
+   restricted by server side flow control (see Section 6)
+
+4.2.  Client gets at least one CRR
+
+   After receiving the first CRR packet to an ACR from the server, the
+   client MUST maintain a timer which is always set to the expected
+   arrival of the last CRR pertaining to this ACR.  Should the timer
+   time out, all expected CRRs that have not yet arrived are considered
+   lost and MAY be re-requested by the client in the next ACR.  The
+   client MAY ignore any CRR that arrives after the end of the
+   corresponding timer.  The client can calculate this timeout based on
+   the requested Packet Rate it sent in the ACR (see Section 5).  The
+   formula for this utilizes the total number of Chunk Requests in the
+   ACR (#CR), the position of the last received request in the ACR
+   (last), the requested Packet Rate (rate) and a small buffer to ensure
+   an appropriate waiting time is given for the last message (buffer):
+   (#CR - last + buffer) / rate
+
+   The client MUST use this formula to restart the timer whenever a new
+   CRR arrives.  The client knows the sending order of the server based
+   of the order of the CRs in the ACR.  The restarting of the timer
+   minimizes the accumulated difference between the actual rate of the
+   network and the requested rate .
+
+   The buffer SHOULD be set to at least 3 further messages.  This way
+   the client waits for three "virtual" messages to arrive before
+   deciding the missing messages of the response got lost.  This
+   correlates with the TCP idea of 3 duplicate ACKs signaling loss of a
+   packet.
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                [Page 11]
+
+Internet-Draft                    SANFT                        July 2022
+
+
+   Note that the calculated expected time it would take for the
+   remaining packets to arrive is a conservative estimate as the server
+   adds an additional constant to the rate as described in Section 5.
+
+5.  Congestion Control
+
+   As described in Section 2.6 the client always includes a sending rate
+   in all ACR messages.
+
+   For the first ACR the client can pick an arbitrary rate which MAY be
+   link or RT dependent.  For all following ACR the client MUST use the
+   measured Packet Rate described in Section 3.
+
+   The server SHOULD increase this requested rate by a constant factor
+   and send all CRRs pertaining to this ACR at the resulting rate.
+
+   We assume that the network's congestion is directly correlated with
+   its ability to deliver messages at a given rate.  If the network
+   experiences congestion it delays or drops packets leading to a lower
+   rate.  This new rate is then considered the rate in which the network
+   is able to send given its current congestions.  Using this new rate
+   for following packets ensures that the network will not be congested
+   even more by our traffic.  Having the server increasing the rate
+   constantly ensures that we also adapt to relaxing congestion and peak
+   for higher potential possible rates.  Thus, this mechanism can
+   successfully adapt to fluctuating network congestion.
+
+   This strategy follows an Additive Increase and Multiplicative
+   Decrease (AMID) congestion control mechanism shared between the
+   client and the server.  The rate is additively increased by the
+   server each time the client sends a new ACR.  Loss on the other hand
+   leads to a multiplicative decrease of the measured Packet Rate.  This
+   mechanism ensures that even when the rate measurement fails to
+   prevent packet loss, the algorithm falls back to a proven solution to
+   congestion control.
+
+6.  Flow Control
+
+6.1.  Client Side Flow Control
+
+   The client MUST NOT request more data than it can handle.  If it can
+   handle more at a specific point in time it MAY also send further
+   request while the server is serving the old request.
+
+
+
+
+
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                [Page 12]
+
+Internet-Draft                    SANFT                        July 2022
+
+
+6.2.  Server Side Flow Control
+
+   There is no explicit flow control on the server side.  The server MAY
+   chose to drop whole requests when it is overloaded.  However, it MUST
+   NOT stop answering a single ACR which it has already sent out
+   responses to.  To prevent overloading the server further, the client
+   MUST use an exponentially increasing backoff for repeated requests.
+   The client MUST double its waiting period (initially 2*RT or 3
+   seconds) for each further repetition.  The client MAY decide to
+   cancel the transfer and inform the user of the failure after a couple
+   of retries.
+
+7.  General Considerations
+
+7.1.  Checksum verification
+
+   Once a client has requested and received every chunk for a file, the
+   client MUST compute the SHA256 digest of the received file.  If the
+   computed digest does not match the checksum provided in the Metadata
+   Request Response for the file, the client SHOULD delete the received
+   data and MAY request the file anew.
+
+7.2.  File change
+
+   If a file on the server changes, the server MUST generate a new File
+   ID and provide it in responses to further Metadata Requests for the
+   changed file.  The server MAY continue to serve previous versions of
+   a file when a Chunk Request with an old file ID is received.
+
+   However, the server MAY also choose to return an Invalid File ID
+   error and refuse to serve old versions.  In that case the client MUST
+   delete the received data, send a new metadata request for the file
+   and request data with the newly provided file ID.
+
+7.3.  File deletion
+
+   If a file on the server is deleted, the server MUST answer every
+   further Metadata Request for the deleted file with a File Not Found
+   error with a File Not Found error code.
+
+   The server MAY continue to serve CRs for the deleted file over a
+   transitional period to ensure that clients may complete downloads
+   that are already in progress.
+
+
+
+
+
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                [Page 13]
+
+Internet-Draft                    SANFT                        July 2022
+
+
+7.4.  Connection migration
+
+   If the client's IP address changes, it MUST continue to send with the
+   old token.  Upon receiving the now invalid old token, the server will
+   issue a new token with the New Token Message.  Thereafter, the client
+   MUST use the new token to resume the file transfer and for all
+   subsequent requests made by the client.
+
+7.5.  Connection drop
+
+   The protocol does not create any connection session between the
+   client and the server.  Therefore, even if the connection between the
+   server and the client is lost for an extended period of time, the
+   client MAY resume the file transfer by requesting the missing chunks.
+
+8.  Normative References
+
+   [RFC0768]  Postel, J., "User Datagram Protocol", STD 6, RFC 768,
+              DOI 10.17487/RFC0768, August 1980,
+              <https://www.rfc-editor.org/info/rfc768>.
+
+   [RFC2119]  Bradner, S., "Key words for use in RFCs to Indicate
+              Requirement Levels", BCP 14, RFC 2119,
+              DOI 10.17487/RFC2119, March 1997,
+              <https://www.rfc-editor.org/info/rfc2119>.
+
+   [RFC3986]  Berners-Lee, T., Fielding, R., and L. Masinter, "Uniform
+              Resource Identifier (URI): Generic Syntax", STD 66,
+              RFC 3986, DOI 10.17487/RFC3986, January 2005,
+              <https://www.rfc-editor.org/info/rfc3986>.
+
+Authors' Addresses
+
+   Markus Gruhlke
+   TUM
+
+
+   Rashid Haddad
+   TUM
+
+
+   Danylo Semerak
+   TUM
+
+
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                [Page 14]
+
+Internet-Draft                    SANFT                        July 2022
+
+
+   Tobias Jülg
+   TUM
+
+
+   Guilhem Roy
+   TUM
+
+
+   Sebastian Kappes
+   TUM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Gruhlke, et al.          Expires 8 January 2023                [Page 15]

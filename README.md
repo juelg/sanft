@@ -1,5 +1,13 @@
 # The SANFT Protocol Go Implementation
 
+This document provides documentation for the Go implementation of the
+Stateless Amplification Negating File
+Transfer Protocol (SANFT), a protocol that allows clients to download
+files from servers.
+The specification of the protocol can be seen in the file [specification.txt](specification.txt).
+
+This project was part of the TUM lecture [Protocol Design](https://www.ce.cit.tum.de/cm/teaching/protocol-design/).
+
 ## Compiling Instructions
 First you need to install `Go` on your system. Checkout the [Go documentation](https://go.dev/doc/install) if you are new to go.
 
