@@ -11,6 +11,19 @@ import (
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/messages"
 )
 
+func TestGetPath(t *testing.T) {
+	s, err := Init(net.ParseIP("127.0.0.1"), 10000, "./", 1024, 1, 0, 0, 0)
+	if err != nil {
+		t.Fatalf(`Error creating server: %v`, err)
+	}
+	s.RootDir = "srv/"
+	assert.Equal(t, s.GetPath("asdf.txt"), "srv/asdf.txt", "wrong path")
+	assert.Equal(t, s.GetPath("../asdf.txt"), "srv/asdf.txt", "wrong path")
+	assert.Equal(t, s.GetPath("//asdf.txt"), "srv/asdf.txt", "wrong path")
+	assert.Equal(t, s.GetPath("/asdf.txt"), "srv/asdf.txt", "wrong path")
+}
+
+
 func TestToken(t *testing.T) {
 	s, err := Init(net.ParseIP("127.0.0.1"), 10000, "/", 1024, 1, 0, 0, 0)
 	if err != nil {

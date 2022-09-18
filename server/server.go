@@ -13,6 +13,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"gitlab.lrz.de/protocol-design-sose-2022-team-0/sanft/markov"
@@ -179,7 +180,16 @@ func (s *Server) Listen(close chan bool) {
 }
 
 func (s *Server) GetPath(path string) string {
-	return s.RootDir + path
+	if path[0] == '/' {
+		// remove trailing "/"
+		path = path[1:]
+	}
+	path = s.RootDir + path
+	// remove ..
+	path = strings.ReplaceAll(path, "..", "")
+	// remove //
+	path = strings.ReplaceAll(path, "//", "/")
+	return path
 }
 
 func (s *Server) handleMDR(msg messages.MDR, addr net.Addr) {
@@ -191,10 +201,6 @@ func (s *Server) handleMDR(msg messages.MDR, addr net.Addr) {
 		s.DebugLogger.Printf("Invalid token in MDR of %v, sending new token...\n", addr)
 		s.sendNTM(msg.Header.Number, messages.NoError, addr)
 		return
-	}
-	if msg.URI[0] == '/' {
-		// remove trailing "/"
-		msg.URI = msg.URI[1:]
 	}
 
 	// check if file exists
